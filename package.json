@@ -1,0 +1,16 @@
+{
+  "name": "strudelbreaks",
+  "version": "0.1.0",
+  "description": "Reusable plumbing for Strudel breakbeat templates: seeded RNG, a Pico-style sequence class, mini-notation helpers, corner-panel UI chrome, and a schema-gated persisted store. Distributed over jsDelivr; not published to npm.",
+  "main": "breaks.js",
+  "scripts": {
+    "test": "node --test 'tests/*.test.js'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jhw/strudelbreaks.git"
+  },
+  "author": "jhw",
+  "license": "MIT",
+  "private": true
+}
