@@ -21,9 +21,12 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import random
 import sys
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+from names import generate_name
 
 SCHEMA_EXPECTED = 6
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
@@ -107,7 +110,7 @@ def format_idx_js(rows, field):
     return '\n'.join(lines)
 
 
-def render(export_path):
+def render(export_path, name):
     payload = json.loads(export_path.read_text())
 
     schema = payload.get('schema')
@@ -145,7 +148,7 @@ def render(export_path):
     )
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUTPUT_DIR / (export_path.stem + '.strudel.js')
+    out_path = OUTPUT_DIR / f'{name}.strudel.js'
     out_path.write_text(rendered)
     return out_path
 
@@ -154,12 +157,18 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('export', type=pathlib.Path,
                     help='path to a tempera captures JSON export')
+    ap.add_argument('--name', default=None,
+                    help='output stem (default: generated adjective-noun)')
+    ap.add_argument('--seed', type=int, default=None,
+                    help='seed the name generator for reproducibility')
     args = ap.parse_args()
 
     if not args.export.is_file():
         sys.exit(f'not a file: {args.export}')
 
-    out = render(args.export)
+    rng = random.Random(args.seed) if args.seed is not None else None
+    name = args.name or generate_name(rng)
+    out = render(args.export, name)
     print(out)
 
 
