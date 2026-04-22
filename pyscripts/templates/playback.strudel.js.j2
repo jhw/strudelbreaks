@@ -17,9 +17,12 @@ setCps(BPM / BEATS_PER_CYCLE / 60);
 // =================
 
 // ===== BAKED ROWS =====
-// rows[row][cell] = { b: break-mini, p: pattern-mini }. Each row is
-// pre-expanded to length {{ max_row_len }} by wrapping its source cells
-// (source length per row noted in each block).
+// rows[row][cell] = { b: break-pattern, p: slice-pattern }. The
+// double-quoted literals are lifted to Pattern instances by Strudel's
+// transpiler (see STRUDEL.md) so the editor can highlight the active
+// cell. Each row is pre-expanded to length {{ max_row_len }} by
+// wrapping its source cells (source length per row noted in each
+// block).
 const rows = [
 {{ rows_js }}
 ];
@@ -34,11 +37,8 @@ const delaySlider = slider(0.5, 0, 1, 0.01);
 // ====================
 
 // ===== MAIN =====
-const breakStr = pick(rowSlider, rows.map(row => pick(cellSlider, row.map(c => c.b))));
-const patternStr = pick(rowSlider, rows.map(row => pick(cellSlider, row.map(c => c.p))));
-
-const break_ = breakStr.fmap(mini).innerJoin();
-const pattern = patternStr.fmap(mini).innerJoin();
+const break_ = pick(rowSlider, rows.map(row => pick(cellSlider, row.map(c => c.b))));
+const pattern = pick(rowSlider, rows.map(row => pick(cellSlider, row.map(c => c.p))));
 
 note(36).sound(break_).loopAt(LOOP_CYCLES).slice(N_SLICES, pattern).delay(delaySlider);
 // ================

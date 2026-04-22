@@ -218,9 +218,20 @@ function renderCaptures() {
 }
 
 function addCell() {
+  const s = currentSliders;
+  const currentBank = capturesPayload.banks[capturesPayload.banks.length - 1] || [];
+  for (const existing of currentBank) {
+    const es = existing.sliders;
+    if (existing.seed === SEED
+        && es.rootBreak === s.rootBreak && es.altBreak === s.altBreak
+        && es.pattern === s.pattern && es.prob === s.prob) {
+      console.warn('[tempera] skipping add: identical patch already in current row');
+      return;
+    }
+  }
   const cell = {
     t: Date.now(), seed: SEED,
-    sliders: { ...currentSliders },
+    sliders: { ...s },
     break: SB.mini.parseBreak(log.break),
     pattern: SB.mini.parsePattern(log.pattern),
   };

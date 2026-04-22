@@ -60,14 +60,24 @@ def build_rows(banks, events_per_cycle):
 
 
 def format_rows_js(rows):
+    # Mini strings are rendered double-quoted so Strudel's transpiler
+    # lifts them to Pattern instances at parse time (see STRUDEL.md) —
+    # this gives us the live-highlighter behaviour and removes the
+    # need for a runtime `.fmap(mini).innerJoin()` lift. b/p sit on
+    # their own lines to keep lines short in the editor.
     blocks = []
     for ri, row in enumerate(rows):
         row_trailing = ',' if ri < len(rows) - 1 else ''
-        cell_lines = [
-            f"    {{ b: '{c['break_str']}', p: '{c['pattern_str']}' }}"
-            for c in row['cells']
-        ]
-        cells_body = ',\n'.join(cell_lines)
+        cell_blocks = []
+        for ci, c in enumerate(row['cells']):
+            cell_trailing = ',' if ci < len(row['cells']) - 1 else ''
+            cell_blocks.append(
+                '    {\n'
+                f'      b: "{c["break_str"]}",\n'
+                f'      p: "{c["pattern_str"]}"\n'
+                f'    }}{cell_trailing}'
+            )
+        cells_body = '\n'.join(cell_blocks)
         blocks.append(
             f"  // row {ri} — source length {row['length']}\n"
             f"  [\n"
