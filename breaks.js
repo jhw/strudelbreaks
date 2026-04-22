@@ -194,6 +194,7 @@
       if (id) element.id = id;
       document.body.appendChild(element);
     }
+    element.dataset.strudelbreaks = '1';
     element.textContent = '';
     element.style.cssText = PANEL_BASE_STYLE + ';' + pos + (style ? ';' + style : '');
     return {
@@ -214,10 +215,23 @@
 
   function createButton(label, onClick, { style = '' } = {}) {
     const b = document.createElement('button');
+    b.dataset.strudelbreaks = '1';
     b.textContent = label;
     b.style.cssText = BUTTON_BASE_STYLE + (style ? ';' + style : '');
     b.addEventListener('click', onClick);
     return b;
+  }
+
+  // Remove every DOM node the library has ever attached. Templates
+  // should call this once after loading StrudelBreaks, before building
+  // fresh widgets — otherwise panels from a previously-loaded template
+  // stay on screen when you paste a different script into strudel.cc.
+  // Self-contained templates that don't load the library can do the
+  // same sweep inline:
+  //   document.querySelectorAll('[data-strudelbreaks]').forEach(el => el.remove());
+  function resetUI() {
+    if (typeof document === 'undefined') return;
+    document.querySelectorAll('[data-strudelbreaks]').forEach(el => el.remove());
   }
 
   // ===== Store =====
@@ -291,7 +305,7 @@
     mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
     util:  { meanIndex, thinByUniforms },
     hex:   { hex2, hexPad, arrayHex },
-    ui:    { createCornerPanel, createButton },
+    ui:    { createCornerPanel, createButton, resetUI },
     store: { createPersistedStore, downloadBlob },
   };
 });

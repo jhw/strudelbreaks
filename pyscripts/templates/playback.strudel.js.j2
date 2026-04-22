@@ -12,6 +12,10 @@ const N_SLICES = {{ n_slices }};
 // ==========================
 
 // ===== SETUP =====
+// Sweep any strudelbreaks-owned widgets left over from a previous
+// script (e.g. tempera's log/captures panels). The library tags every
+// DOM node it creates with data-strudelbreaks; this removes them all.
+document.querySelectorAll('[data-strudelbreaks]').forEach(el => el.remove());
 await samples(gistUrl);
 setCps(BPM / BEATS_PER_CYCLE / 60);
 // =================

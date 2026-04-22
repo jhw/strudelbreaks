@@ -49,7 +49,7 @@ window.StrudelBreaks = {
   mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
   util:  { meanIndex, thinByUniforms },
   hex:   { hex2, hexPad, arrayHex },
-  ui:    { createCornerPanel, createButton },
+  ui:    { createCornerPanel, createButton, resetUI },
   store: { createPersistedStore, downloadBlob },
 };
 ```
@@ -109,6 +109,13 @@ at the edge (for Strudel's `mini()` / `fmap(mini).innerJoin()` dance).
   `setText` for plain-text HUDs.
 - `createButton(label, onClick, { style? })` → `HTMLButtonElement` with
   the house style.
+- `resetUI()` — removes every DOM node the library has attached.
+  Templates should call this once after loading StrudelBreaks so
+  widgets from a previously-pasted script don't linger. Every element
+  created by `createCornerPanel` / `createButton` is tagged with
+  `data-strudelbreaks="1"`; self-contained templates that don't load
+  the library can do the same sweep inline:
+  `document.querySelectorAll('[data-strudelbreaks]').forEach(el => el.remove())`.
 
 No knowledge of patches, breaks, or captures — those live in the
 consuming template.

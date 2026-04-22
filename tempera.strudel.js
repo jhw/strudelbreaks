@@ -55,6 +55,8 @@ const SB = await new Promise((resolve, reject) => {
   document.head.appendChild(s);
 });
 
+SB.ui.resetUI();
+
 const PATTERN_MODES = ['forward', 'reverse', 'ping_pong', 'ping_pong_repeat'];
 if (PATTERN_MODES.length !== N_PATTERN_MODES) throw new Error('N_PATTERN_MODES must match PATTERN_MODES.length');
 
