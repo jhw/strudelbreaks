@@ -173,17 +173,17 @@ const log = {
     if (p !== lastPatch) { lastPatch = p; renderLog(); }
   },
   get break() { return currentBreak; },
+  get pattern() { return currentPattern; },
 };
 // =====================
 
 // ===== CAPTURES PANEL =====
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 6;
 const captureContext = {
   gistUser, gistId,
   bpm: BPM, beatsPerCycle: BEATS_PER_CYCLE, loopCycles: LOOP_CYCLES,
   nSlices: N_SLICES, eventsPerCycle: EVENTS_PER_CYCLE,
   nBreaks: N_BREAKS, nPatterns: N_PATTERNS, nProbs: N_PROBS,
-  patternModes: PATTERN_MODES,
 };
 const captureDefault = { schema: SCHEMA_VERSION, context: captureContext, banks: [] };
 const capturesStore = SB.store.createPersistedStore({
@@ -218,25 +218,11 @@ function renderCaptures() {
 }
 
 function addCell() {
-  const shapeIdx = currentSliders.pattern >> 2;
-  const currentBank = capturesPayload.banks[capturesPayload.banks.length - 1] || [];
-  for (const existing of currentBank) {
-    if (existing.seed === SEED && (existing.sliders.pattern >> 2) === shapeIdx) {
-      console.warn('[tempera] skipping add: shape ' + shapeIdx + ' already in current bank');
-      return;
-    }
-  }
-  const baseIdx = shapeIdx * N_PATTERN_MODES;
-  const prob = currentSliders.prob;
-  const patternVariants = [];
-  for (let m = 0; m < N_PATTERN_MODES; m++) {
-    patternVariants.push(SB.mini.parsePattern(patternStringsByPattern[baseIdx + m][prob]));
-  }
   const cell = {
     t: Date.now(), seed: SEED,
     sliders: { ...currentSliders },
     break: SB.mini.parseBreak(log.break),
-    patternVariants,
+    pattern: SB.mini.parsePattern(log.pattern),
   };
   if (capturesPayload.banks.length === 0) capturesPayload.banks.push([]);
   capturesPayload.banks[capturesPayload.banks.length - 1].push(cell);
