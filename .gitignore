@@ -2,3 +2,8 @@ node_modules/
 .DS_Store
 tmp/
 *.log
+
+# Python
+.venv/
+__pycache__/
+*.pyc
