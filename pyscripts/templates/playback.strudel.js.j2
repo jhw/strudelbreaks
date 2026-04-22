@@ -21,14 +21,24 @@ setCps(BPM / BEATS_PER_CYCLE / 60);
 // =================
 
 // ===== BAKED ROWS =====
-// rows[row][cell] = { b: break-pattern, p: slice-pattern }. The
-// double-quoted literals are lifted to Pattern instances by Strudel's
-// transpiler (see STRUDEL.md) so the editor can highlight the active
-// cell. Each row is pre-expanded to length {{ max_row_len }} by
-// wrapping its source cells (source length per row noted in each
-// block).
-const rows = [
-{{ rows_js }}
+// Per-row deduplicated vocabularies of breaks and patterns. Double-quoted
+// literals are lifted to Pattern instances by Strudel's transpiler
+// (see STRUDEL.md) so the editor can highlight the active cell. The
+// `*Idx` arrays map cell positions (0..{{ max_row_len - 1 }}) back to
+// vocab entries; rows shorter than the max are pre-expanded by
+// wrapping cells modulo their source length.
+const breakVocab = [
+{{ break_vocab_js }}
+];
+const breakIdx = [
+{{ break_idx_js }}
+];
+
+const patternVocab = [
+{{ pattern_vocab_js }}
+];
+const patternIdx = [
+{{ pattern_idx_js }}
 ];
 // ======================
 
@@ -41,8 +51,8 @@ const delaySlider = slider(0.5, 0, 1, 0.01);
 // ====================
 
 // ===== MAIN =====
-const break_ = pick(rowSlider, rows.map(row => pick(cellSlider, row.map(c => c.b))));
-const pattern = pick(rowSlider, rows.map(row => pick(cellSlider, row.map(c => c.p))));
+const break_ = pick(rowSlider, breakIdx.map((idxs, i) => pick(cellSlider, idxs.map(k => breakVocab[i][k]))));
+const pattern = pick(rowSlider, patternIdx.map((idxs, i) => pick(cellSlider, idxs.map(k => patternVocab[i][k]))));
 
 note(36).sound(break_).loopAt(LOOP_CYCLES).slice(N_SLICES, pattern).delay(delaySlider);
 // ================

@@ -40,6 +40,20 @@ def format_pattern(slices, rest_char='~'):
     return '[' + ' '.join(rest_char if s is None else str(s) for s in slices) + ']'
 
 
+def dedup_indexed(values):
+    """Return (vocab, idx) where vocab is the unique items in first-seen
+    order and idx[i] points values[i] back into vocab."""
+    seen = {}
+    vocab = []
+    idx = []
+    for v in values:
+        if v not in seen:
+            seen[v] = len(vocab)
+            vocab.append(v)
+        idx.append(seen[v])
+    return vocab, idx
+
+
 def build_rows(banks, events_per_cycle):
     non_empty = [b for b in banks if b]
     if not non_empty:
@@ -48,43 +62,49 @@ def build_rows(banks, events_per_cycle):
     rows = []
     for bank in non_empty:
         source_len = len(bank)
-        cells = []
+        breaks = []
+        patterns = []
         for i in range(max_len):
             cell = bank[i % source_len]
-            cells.append({
-                'break_str': format_break(cell['break'], events_per_cycle),
-                'pattern_str': format_pattern(cell['pattern']),
-            })
-        rows.append({'length': source_len, 'cells': cells})
+            breaks.append(format_break(cell['break'], events_per_cycle))
+            patterns.append(format_pattern(cell['pattern']))
+        break_vocab, break_idx = dedup_indexed(breaks)
+        pattern_vocab, pattern_idx = dedup_indexed(patterns)
+        rows.append({
+            'length': source_len,
+            'break_vocab': break_vocab,
+            'break_idx': break_idx,
+            'pattern_vocab': pattern_vocab,
+            'pattern_idx': pattern_idx,
+        })
     return rows, max_len
 
 
-def format_rows_js(rows):
+def format_vocab_js(rows, field):
     # Mini strings are rendered double-quoted so Strudel's transpiler
-    # lifts them to Pattern instances at parse time (see STRUDEL.md) —
-    # this gives us the live-highlighter behaviour and removes the
-    # need for a runtime `.fmap(mini).innerJoin()` lift. b/p sit on
-    # their own lines to keep lines short in the editor.
+    # lifts them to Pattern instances at parse time (see STRUDEL.md).
+    # Each vocab item on its own line — break strings run ~55 chars,
+    # so two-per-line would push past a comfortable editor width.
     blocks = []
     for ri, row in enumerate(rows):
         row_trailing = ',' if ri < len(rows) - 1 else ''
-        cell_blocks = []
-        for ci, c in enumerate(row['cells']):
-            cell_trailing = ',' if ci < len(row['cells']) - 1 else ''
-            cell_blocks.append(
-                '    {\n'
-                f'      b: "{c["break_str"]}",\n'
-                f'      p: "{c["pattern_str"]}"\n'
-                f'    }}{cell_trailing}'
-            )
-        cells_body = '\n'.join(cell_blocks)
-        blocks.append(
-            f"  // row {ri} — source length {row['length']}\n"
-            f"  [\n"
-            f"{cells_body}\n"
-            f"  ]{row_trailing}"
-        )
+        items = row[field]
+        item_lines = []
+        for ii, s in enumerate(items):
+            item_trailing = ',' if ii < len(items) - 1 else ''
+            item_lines.append(f'    "{s}"{item_trailing}')
+        body = '\n'.join(item_lines)
+        blocks.append(f"  [\n{body}\n  ]{row_trailing}")
     return '\n'.join(blocks)
+
+
+def format_idx_js(rows, field):
+    lines = []
+    for ri, row in enumerate(rows):
+        trailing = ',' if ri < len(rows) - 1 else ''
+        joined = ', '.join(str(k) for k in row[field])
+        lines.append(f'  [{joined}]{trailing}')
+    return '\n'.join(lines)
 
 
 def render(export_path):
@@ -118,7 +138,10 @@ def render(export_path):
         n_slices=ctx['nSlices'],
         n_rows=len(rows),
         max_row_len=max_row_len,
-        rows_js=format_rows_js(rows),
+        break_vocab_js=format_vocab_js(rows, 'break_vocab'),
+        break_idx_js=format_idx_js(rows, 'break_idx'),
+        pattern_vocab_js=format_vocab_js(rows, 'pattern_vocab'),
+        pattern_idx_js=format_idx_js(rows, 'pattern_idx'),
     )
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
