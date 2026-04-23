@@ -140,14 +140,18 @@ function patchCode(sliders) {
        + SB.hex.hex2(sliders.prob | 0);
 }
 
-function patchTooltip(sliders) {
-  return [sliders.rootBreak | 0, sliders.altBreak | 0, sliders.pattern | 0, sliders.prob | 0].join('|');
+function patchDecimal(sliders) {
+  return [sliders.rootBreak | 0, sliders.altBreak | 0, sliders.pattern | 0, sliders.prob | 0].join('/');
 }
 
 function patchSpan(sliders) {
   const s = document.createElement('span');
-  s.textContent = patchCode(sliders);
-  s.title = patchTooltip(sliders);
+  const hex = patchCode(sliders);
+  const dec = patchDecimal(sliders);
+  s.textContent = hex;
+  s.style.cursor = 'help';
+  s.addEventListener('mouseenter', () => { s.textContent = dec; });
+  s.addEventListener('mouseleave', () => { s.textContent = hex; });
   return s;
 }
 
