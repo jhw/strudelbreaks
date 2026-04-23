@@ -88,10 +88,12 @@ at the edge (for Strudel's `mini()` / `fmap(mini).innerJoin()` dance).
 
 - `meanIndex(xs)` — mean of a list, `0` on empty. Used as a sort key so
   shape-major browsing moves through different regions of the source.
-- `thinByUniforms(shape, uniforms, probability)` — masks slots where
-  `uniforms[i] > probability`. Monotonic: `p1 <= p2` means every slot
-  surviving at `p1` also survives at `p2`, so sweeping density only
-  adds or removes notes without reshaping the pattern.
+- `thinByUniforms(shape, uniforms, probability)` — keeps exactly
+  `round(probability * shape.length)` slots: those with the lowest
+  `uniforms[i]` (ties broken by index). Stepwise monotonic: sweeping
+  `probability` up adds slots one at a time without ever removing, so
+  the rhythmic shape is preserved across levels. The survivor count is
+  exact — no Binomial variance.
 
 ### hex
 

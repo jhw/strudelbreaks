@@ -142,12 +142,24 @@
     return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
   }
 
-  // Monotonic density masking: a slot survives at probability p iff
-  // uniforms[i] <= p. Callers supply uniforms once per shape so that
-  // sweeping `probability` only adds or removes notes — the rhythmic
-  // shape is preserved across levels.
+  // Rank-based density masking: keeps exactly round(probability * n)
+  // slots — the ones with the lowest uniforms[i] (ties broken by index).
+  // Callers supply uniforms once per shape, so sweeping `probability` is
+  // stepwise monotonic: each increment adds slots without ever removing,
+  // and the survivor count is exact rather than a Binomial draw.
   function thinByUniforms(shape, uniforms, probability) {
-    return shape.map((v, i) => uniforms[i] > probability ? null : v);
+    const n = shape.length;
+    const keep = Math.round(probability * n);
+    if (keep <= 0) return shape.map(() => null);
+    if (keep >= n) return shape.slice();
+    const kept = new Set(
+      uniforms
+        .map((u, i) => [u, i])
+        .sort((a, b) => a[0] - b[0] || a[1] - b[1])
+        .slice(0, keep)
+        .map(([, i]) => i)
+    );
+    return shape.map((v, i) => kept.has(i) ? v : null);
   }
 
   // ===== Hex =====
