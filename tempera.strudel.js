@@ -140,6 +140,17 @@ function patchCode(sliders) {
        + SB.hex.hex2(sliders.prob | 0);
 }
 
+function patchTooltip(sliders) {
+  return [sliders.rootBreak | 0, sliders.altBreak | 0, sliders.pattern | 0, sliders.prob | 0].join('|');
+}
+
+function patchSpan(sliders) {
+  const s = document.createElement('span');
+  s.textContent = patchCode(sliders);
+  s.title = patchTooltip(sliders);
+  return s;
+}
+
 function breakHex(breakStr) {
   const slugs = SB.mini.parseBreak(breakStr);
   if (slugs.length === 0) return breakStr;
@@ -161,11 +172,13 @@ const logPanel = SB.ui.createCornerPanel({
 });
 let currentBreak = '', currentPattern = '', lastPatch = '';
 function renderLog() {
-  logPanel.setText(
-    'patch:   ' + patchCode(currentSliders) + '\n' +
-    'break:   ' + breakHex(currentBreak) + '\n' +
-    'pattern: ' + patternHex(currentPattern)
-  );
+  logPanel.element.textContent = '';
+  logPanel.element.appendChild(document.createTextNode('patch:   '));
+  logPanel.element.appendChild(patchSpan(currentSliders));
+  logPanel.element.appendChild(document.createTextNode(
+    '\nbreak:   ' + breakHex(currentBreak) +
+    '\npattern: ' + patternHex(currentPattern)
+  ));
 }
 const log = {
   setBreak: (s) => { if (s !== currentBreak) { currentBreak = s; renderLog(); } },
@@ -208,15 +221,19 @@ const listEl = document.createElement('div');
 listEl.style.cssText = 'overflow-y:auto;overflow-x:auto;white-space:pre;min-height:1.4em';
 
 function renderCaptures() {
+  listEl.textContent = '';
   const banks = capturesPayload.banks;
   if (banks.length === 0) { listEl.textContent = '(no captures)'; return; }
   const iw = String(banks.length - 1).length;
-  const lines = [];
   for (let i = banks.length - 1; i >= 0; i--) {
-    const row = banks[i].map(c => patchCode(c.sliders)).join('  ');
-    lines.push(String(i).padStart(iw, ' ') + ' │ ' + row);
+    const row = document.createElement('div');
+    row.appendChild(document.createTextNode(String(i).padStart(iw, ' ') + ' │ '));
+    banks[i].forEach((c, j) => {
+      if (j > 0) row.appendChild(document.createTextNode('  '));
+      row.appendChild(patchSpan(c.sliders));
+    });
+    listEl.appendChild(row);
   }
-  listEl.textContent = lines.join('\n');
 }
 
 function addCell() {
