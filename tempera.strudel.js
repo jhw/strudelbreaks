@@ -133,21 +133,14 @@ const patternStringsByPattern = sequences.flatMap((seq) => {
 // ===== DOMAIN FORMATTERS =====
 const nameIndex = Object.fromEntries(names.map((n, i) => [n, i]));
 
-function patchCode(sliders) {
-  return SB.hex.hex2(sliders.rootBreak | 0)
-       + SB.hex.hex2(sliders.altBreak | 0)
-       + SB.hex.hex2(sliders.pattern | 0)
-       + SB.hex.hex2(sliders.prob | 0);
-}
-
-function patchDecimal(sliders) {
-  return [sliders.rootBreak | 0, sliders.altBreak | 0, sliders.pattern | 0, sliders.prob | 0].join('/');
+function patchForms(sliders) {
+  const vals = [sliders.rootBreak | 0, sliders.altBreak | 0, sliders.pattern | 0, sliders.prob | 0];
+  return { hex: vals.map(SB.hex.hex2).join(''), dec: vals.join('/') };
 }
 
 function patchSpan(sliders) {
+  const { hex, dec } = patchForms(sliders);
   const s = document.createElement('span');
-  const hex = patchCode(sliders);
-  const dec = patchDecimal(sliders);
   s.textContent = hex;
   s.style.cursor = 'help';
   s.addEventListener('mouseenter', () => { s.textContent = dec; });
@@ -188,7 +181,7 @@ const log = {
   setBreak: (s) => { if (s !== currentBreak) { currentBreak = s; renderLog(); } },
   setPattern: (s) => { if (s !== currentPattern) { currentPattern = s; renderLog(); } },
   tick: () => {
-    const p = patchCode(currentSliders);
+    const p = patchForms(currentSliders).hex;
     if (p !== lastPatch) { lastPatch = p; renderLog(); }
   },
   get break() { return currentBreak; },
