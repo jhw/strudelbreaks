@@ -19,7 +19,7 @@ const N_BREAKS = 64;
 const N_SEQUENCES = 64;
 const N_PATTERN_MODES = 4;
 const N_PATTERNS = N_SEQUENCES * N_PATTERN_MODES;
-const N_PROBS = 16;
+const N_PROBS = 8;
 
 const SEQ_MIN_LENGTH = 2;
 const SEQ_MAX_LENGTH = 5;
@@ -162,7 +162,7 @@ function patternHex(patternStr) {
 // =============================
 
 // ===== LOG PANEL =====
-const currentSliders = { rootBreak: 0, altBreak: 0, pattern: 0, prob: 15 };
+const currentSliders = { rootBreak: 0, altBreak: 0, pattern: 0, prob: 7 };
 const logPanel = SB.ui.createCornerPanel({
   corner: 'bottom-right', id: 'log-display',
   style: 'padding:12px 14px;max-width:520px;white-space:pre-wrap;cursor:text',
@@ -190,7 +190,7 @@ const log = {
 // =====================
 
 // ===== CAPTURES PANEL =====
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 const captureContext = {
   gistUser, gistId,
   bpm: BPM, beatsPerCycle: BEATS_PER_CYCLE, loopCycles: LOOP_CYCLES,
@@ -292,7 +292,7 @@ renderCaptures();
 const rootBreakSlider = slider(0, 0, 15, 1);
 const altBreakSlider = slider(0, 0, 63, 1);
 const patternSlider = slider(0, 0, 255, 1);
-const probSlider = slider(15, 0, 15, 1);
+const probSlider = slider(7, 0, 7, 1);
 const delaySlider = slider(0.5, 0, 1, 0.01);
 
 const rootBreakSig = rootBreakSlider.withValue(v => { currentSliders.rootBreak = v | 0; log.tick(); return v; });
