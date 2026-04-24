@@ -4,10 +4,10 @@
 Extracts .zip files from tmp/octatrack/ into /Volumes/OCTATRACK/strudelbeats/.
 
 Usage:
-    push_octatrack.py              # list all, ask per project
-    push_octatrack.py pattern      # filter by name fragment, ask per project
-    push_octatrack.py -f           # copy all without prompting (skip existing)
-    push_octatrack.py -f pattern   # copy matching without prompting
+    push.py              # list all, ask per project
+    push.py pattern      # filter by name fragment, ask per project
+    push.py -f           # copy all without prompting (skip existing)
+    push.py -f pattern   # copy matching without prompting
 """
 
 import argparse
@@ -15,7 +15,9 @@ import pathlib
 import sys
 import zipfile
 
-SOURCE_DIR = pathlib.Path(__file__).resolve().parent.parent / 'tmp' / 'octatrack'
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent.parent.parent
+SOURCE_DIR = REPO_ROOT / 'tmp' / 'octatrack'
 OT_DEVICE = pathlib.Path('/Volumes/OCTATRACK')
 OT_SET = OT_DEVICE / 'strudelbeats'
 

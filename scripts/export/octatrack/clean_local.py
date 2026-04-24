@@ -11,7 +11,9 @@ Usage:
 import argparse
 import pathlib
 
-OT_DIR = pathlib.Path(__file__).resolve().parent.parent / 'tmp' / 'octatrack'
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent.parent.parent
+OT_DIR = REPO_ROOT / 'tmp' / 'octatrack'
 
 
 def find_projects(pattern=None):

@@ -11,28 +11,34 @@ selects a cell within the bank. The cell slider is sized on the longest
 row; shorter rows wrap by cell-index modulo their source length.
 
 Usage:
-    python pyscripts/render_capture.py <path/to/export.json>
+    python scripts/export/strudel/render.py <path/to/export.json>
 
 Output:
     tmp/strudel/<basename>.strudel.js
 """
 from __future__ import annotations
 
-import argparse
-import json
 import pathlib
-import random
 import sys
+
+# Cross-subdir imports: add scripts/export/ to sys.path so common/ is
+# reachable regardless of the cwd the script is invoked from.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-from names import generate_name
+from common.cli import build_parser, require_file, resolve_name
+from common.schema import load_export
 
-SCHEMA_EXPECTED = 6
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent
+REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 TEMPLATE_DIR = SCRIPT_DIR / 'templates'
 OUTPUT_DIR = REPO_ROOT / 'tmp' / 'strudel'
+
+REQUIRED_CTX = (
+    'gistUser', 'gistId', 'bpm', 'beatsPerCycle',
+    'loopCycles', 'nSlices', 'eventsPerCycle',
+)
 
 
 def format_break(names, events_per_cycle):
@@ -111,18 +117,7 @@ def format_idx_js(rows, field):
 
 
 def render(export_path, name):
-    payload = json.loads(export_path.read_text())
-
-    schema = payload.get('schema')
-    if schema != SCHEMA_EXPECTED:
-        sys.exit(f'schema mismatch: got {schema}, expected {SCHEMA_EXPECTED}')
-
-    ctx = payload.get('context') or {}
-    for key in ('gistUser', 'gistId', 'bpm', 'beatsPerCycle',
-                'loopCycles', 'nSlices', 'eventsPerCycle'):
-        if key not in ctx:
-            sys.exit(f'context missing field: {key}')
-
+    payload, ctx = load_export(export_path, REQUIRED_CTX)
     rows, max_row_len = build_rows(payload.get('banks') or [], ctx['eventsPerCycle'])
 
     env = Environment(
@@ -133,7 +128,7 @@ def render(export_path, name):
     tmpl = env.get_template('playback.strudel.js.j2')
     rendered = tmpl.render(
         source_filename=export_path.name,
-        schema=schema,
+        schema=payload['schema'],
         gist_url=f"https://gist.githubusercontent.com/{ctx['gistUser']}/{ctx['gistId']}/raw/strudel.json",
         bpm=ctx['bpm'],
         beats_per_cycle=ctx['beatsPerCycle'],
@@ -154,21 +149,9 @@ def render(export_path, name):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('export', type=pathlib.Path,
-                    help='path to a tempera captures JSON export')
-    ap.add_argument('--name', default=None,
-                    help='output stem (default: generated adjective-noun)')
-    ap.add_argument('--seed', type=int, default=None,
-                    help='seed the name generator for reproducibility')
-    args = ap.parse_args()
-
-    if not args.export.is_file():
-        sys.exit(f'not a file: {args.export}')
-
-    rng = random.Random(args.seed) if args.seed is not None else None
-    name = args.name or generate_name(rng)
-    out = render(args.export, name)
+    args = build_parser(__doc__.splitlines()[0]).parse_args()
+    require_file(args.export)
+    out = render(args.export, resolve_name(args))
     print(out)
 
 

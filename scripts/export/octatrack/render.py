@@ -13,20 +13,20 @@ tmp/samples/<gistId>/. Each sample slot gets 16 equal slice markers so the
 slice_index p-locks resolve on-device.
 
 Usage:
-    python pyscripts/render_octatrack.py <path/to/export.json> [--name NAME] [--seed N]
+    python scripts/export/octatrack/render.py <path/to/export.json> [--name NAME] [--seed N]
 
 Output:
     tmp/octatrack/<name>.zip
 """
 from __future__ import annotations
 
-import argparse
 import json
 import pathlib
-import random
 import sys
 import urllib.request
 import wave
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from octapy import (
     Project,
@@ -36,30 +36,18 @@ from octapy import (
     SliceMode,
 )
 
-from names import generate_name
+from common.cli import build_parser, require_file, resolve_name
+from common.schema import load_export
 
-SCHEMA_EXPECTED = 6
 N_SLICES = 16
 OT_PATTERN_STEPS = 32  # 2 bars at 1/16 per step
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent
+REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 OUTPUT_DIR = REPO_ROOT / 'tmp' / 'octatrack'
 SAMPLES_DIR = REPO_ROOT / 'tmp' / 'samples'
 
-
-def load_export(path):
-    payload = json.loads(path.read_text())
-    schema = payload.get('schema')
-    if schema != SCHEMA_EXPECTED:
-        sys.exit(f'schema mismatch: got {schema}, expected {SCHEMA_EXPECTED}')
-    ctx = payload.get('context') or {}
-    for key in ('gistUser', 'gistId', 'bpm', 'eventsPerCycle', 'loopCycles', 'nSlices'):
-        if key not in ctx:
-            sys.exit(f'context missing field: {key}')
-    if ctx['nSlices'] != N_SLICES:
-        sys.exit(f'nSlices {ctx["nSlices"]} != {N_SLICES} (octatrack render assumes 16 slices)')
-    return payload, ctx
+REQUIRED_CTX = ('gistUser', 'gistId', 'bpm', 'eventsPerCycle', 'loopCycles', 'nSlices')
 
 
 def fetch_sample_manifest(gist_user, gist_id):
@@ -132,7 +120,10 @@ def collect_break_names(banks):
 
 
 def build_project(export_path, name):
-    payload, ctx = load_export(export_path)
+    payload, ctx = load_export(export_path, REQUIRED_CTX)
+    if ctx['nSlices'] != N_SLICES:
+        sys.exit(f'nSlices {ctx["nSlices"]} != {N_SLICES} (octatrack render assumes 16 slices)')
+
     banks_in = [b for b in (payload.get('banks') or []) if b]
     if not banks_in:
         sys.exit('no non-empty banks in export')
@@ -208,21 +199,9 @@ def render(export_path, name):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('export', type=pathlib.Path,
-                    help='path to a tempera captures JSON export')
-    ap.add_argument('--name', default=None,
-                    help='project name (default: generated adjective-noun)')
-    ap.add_argument('--seed', type=int, default=None,
-                    help='seed the name generator for reproducibility')
-    args = ap.parse_args()
-
-    if not args.export.is_file():
-        sys.exit(f'not a file: {args.export}')
-
-    rng = random.Random(args.seed) if args.seed is not None else None
-    name = args.name or generate_name(rng)
-    out = render(args.export, name)
+    args = build_parser(__doc__.splitlines()[0]).parse_args()
+    require_file(args.export)
+    out = render(args.export, resolve_name(args))
     print(out)
 
 
