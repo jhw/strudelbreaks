@@ -142,10 +142,7 @@ function patchHex(sliders) {
 function patchSpan(sliders) {
   const s = document.createElement('span');
   s.textContent = patchHex(sliders);
-  // Asymmetric padding compensates for the font bias that makes a '<'
-  // icon look closer to the first hex digit than the '>' icon does to
-  // the last. Extra space on the left only — tuned by eye.
-  s.style.cssText = 'cursor:pointer;padding:0 0 0 3px';
+  s.style.cssText = 'cursor:pointer';
   s.addEventListener('click', () => snapTo(sliders));
   return s;
 }
@@ -308,15 +305,6 @@ function deleteCell(i, j) {
   renderCaptures();
 }
 
-function moveCell(i, j, delta) {
-  const bank = capturesPayload.banks[i];
-  const k = j + delta;
-  if (k < 0 || k >= bank.length) return;
-  [bank[j], bank[k]] = [bank[k], bank[j]];
-  capturesStore.set(capturesPayload);
-  renderCaptures();
-}
-
 function renderCaptures() {
   listEl.textContent = '';
   const banks = capturesPayload.banks;
@@ -326,7 +314,6 @@ function renderCaptures() {
   }
   capturesList.element.style.display = '';
   const iw = String(banks.length - 1).length;
-  const moveOpts = { hoverBg: '#0a0', hoverColor: '#000' };
   for (let i = banks.length - 1; i >= 0; i--) {
     const bank = banks[i];
     const row = document.createElement('div');
@@ -339,11 +326,7 @@ function renderCaptures() {
     row.appendChild(document.createTextNode('│ '));
     bank.forEach((c, j) => {
       if (j > 0) row.appendChild(document.createTextNode(' │ '));
-      row.appendChild(SB.ui.createIconButton('<', () => moveCell(i, j, -1),
-        { ...moveOpts, disabled: j === 0 }));
       row.appendChild(patchSpan(c.sliders));
-      row.appendChild(SB.ui.createIconButton('>', () => moveCell(i, j, +1),
-        { ...moveOpts, disabled: j === bank.length - 1 }));
       row.appendChild(SB.ui.createDeleteIcon(() => deleteCell(i, j)));
     });
 
