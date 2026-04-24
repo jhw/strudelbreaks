@@ -297,9 +297,14 @@ renderCaptures();
 // signals read from it via ref(() => …), which is exactly how Strudel's
 // own slider() is implemented under the hood. delay stays as a native
 // Strudel slider — continuous float, not part of a patch.
+// Render the log once so its measured height (used by stack: below)
+// reflects real content, not just padding.
+renderLog();
+
 const sliderPanel = SB.ui.createSliderPanel({
   corner: 'bottom-right', id: 'slider-panel',
-  style: 'bottom:110px;min-width:340px;max-width:520px',
+  style: 'min-width:340px;max-width:520px',
+  stack: 'log-display',
   format: SB.hex.hex2,
   rows: [
     { key: 'rootBreak', label: 'rootBreak', min: 0, max: names.length - 1, initial: currentSliders.rootBreak,

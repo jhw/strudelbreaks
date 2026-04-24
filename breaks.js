@@ -176,11 +176,12 @@
   }
 
   // ===== UI =====
+  const PANEL_GAP = 10;
   const CORNER_STYLES = {
-    'top-left':     'top:10px;left:10px',
-    'top-right':    'top:10px;right:10px',
-    'bottom-left':  'bottom:10px;left:10px',
-    'bottom-right': 'bottom:10px;right:10px',
+    'top-left':     'top:'    + PANEL_GAP + 'px;left:'  + PANEL_GAP + 'px',
+    'top-right':    'top:'    + PANEL_GAP + 'px;right:' + PANEL_GAP + 'px',
+    'bottom-left':  'bottom:' + PANEL_GAP + 'px;left:'  + PANEL_GAP + 'px',
+    'bottom-right': 'bottom:' + PANEL_GAP + 'px;right:' + PANEL_GAP + 'px',
   };
 
   const PANEL_BASE_STYLE = [
@@ -197,7 +198,14 @@
     '-webkit-user-select:text',
   ].join(';');
 
-  function createCornerPanel({ corner, id, style = '' }) {
+  // `stack` stacks this panel adjacent to another already-rendered
+  // panel (reference by id). For bottom-* corners the new panel sits
+  // above the ref; for top-* corners it sits below. The gap matches
+  // the corner edge margin so vertically-stacked blocks have the same
+  // spacing as the margin to the viewport edge. The ref panel must
+  // already be in the DOM with its final content at call time —
+  // measurement is one-shot via offsetHeight.
+  function createCornerPanel({ corner, id, style = '', stack }) {
     const pos = CORNER_STYLES[corner];
     if (!pos) throw new Error('[strudelbreaks] unknown corner: ' + corner);
     let element = id ? document.getElementById(id) : null;
@@ -208,7 +216,19 @@
     }
     element.dataset.strudelbreaks = '1';
     element.textContent = '';
-    element.style.cssText = PANEL_BASE_STYLE + ';' + pos + (style ? ';' + style : '');
+    let stackStyle = '';
+    if (stack) {
+      const refEl = document.getElementById(stack);
+      if (!refEl) {
+        console.warn('[strudelbreaks] stack ref "' + stack + '" not found; ignoring');
+      } else {
+        const offset = PANEL_GAP + refEl.offsetHeight + PANEL_GAP;
+        stackStyle = (corner.startsWith('bottom') ? 'bottom:' : 'top:') + offset + 'px';
+      }
+    }
+    element.style.cssText = PANEL_BASE_STYLE + ';' + pos
+      + (style ? ';' + style : '')
+      + (stackStyle ? ';' + stackStyle : '');
     return {
       element,
       setText(text) { element.textContent = text; },
@@ -292,12 +312,12 @@
   // computes a uniform readout width from it so all rows align on the
   // left edge of the range input). `setAll({ key: value, … })` snaps
   // every named row at once without firing onChange.
-  function createSliderPanel({ corner, id, style = '', rows, format }) {
+  function createSliderPanel({ corner, id, style = '', stack, rows, format }) {
     const fmtFallback = (v) => String(v | 0);
     const widthOf = (f) => Math.max(...rows.flatMap(r => [f(r.min).length, f(r.max).length]));
     const uniformWidth = widthOf(format || fmtFallback);
 
-    const panel = createCornerPanel({ corner, id, style });
+    const panel = createCornerPanel({ corner, id, style, stack });
     const sliderRows = {};
     for (const cfg of rows) {
       if (!cfg.key) throw new Error('[strudelbreaks] createSliderPanel row missing key');

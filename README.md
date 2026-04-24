@@ -104,11 +104,17 @@ at the edge (for Strudel's `mini()` / `fmap(mini).innerJoin()` dance).
 
 ### ui
 
-- `createCornerPanel({ corner, id, style? })` → `{ element, setText }`.
-  Creates (or reuses, by `id`) a fixed-position monospace green-on-dark
-  div and pins it to one of `top-left | top-right | bottom-left |
-  bottom-right`. Append children to `element` for richer panels; use
-  `setText` for plain-text HUDs.
+- `createCornerPanel({ corner, id, style?, stack? })` →
+  `{ element, setText }`. Creates (or reuses, by `id`) a fixed-position
+  monospace green-on-dark div and pins it to one of
+  `top-left | top-right | bottom-left | bottom-right`. Append children
+  to `element` for richer panels; use `setText` for plain-text HUDs.
+  `stack: <otherPanelId>` stacks this panel adjacent to an
+  already-rendered sibling (above the ref for bottom corners, below it
+  for top corners) with the same 10px gap used at the corner edge —
+  so stacked blocks have consistent spacing whether they grow down
+  from the top or up from the bottom. The ref panel must already have
+  its final content at call time; measurement is one-shot.
 - `createButton(label, onClick, { style? })` → `HTMLButtonElement` with
   the house style.
 - `createSliderRow({ label, min, max, initial?, step?, onChange, format?, width? })` →
@@ -118,12 +124,14 @@ at the edge (for Strudel's `mini()` / `fmap(mini).innerJoin()` dance).
   `onChange(v|0)` fires on user drag; `setValue(v)` syncs thumb +
   readout without firing `onChange`, so a caller that already owns the
   authoritative value can snap without feedback loops.
-- `createSliderPanel({ corner, id, style?, rows, format? })` →
+- `createSliderPanel({ corner, id, style?, stack?, rows, format? })` →
   `{ element, rows, setAll }`. Corner panel containing N slider rows
   keyed by `row.key`. A panel-level `format` applies to every row, and
   the panel computes a uniform readout width from it so all rows
   align on the left edge of the range input. `setAll({ key: value, … })`
-  snaps every named row at once. Thin convenience over
+  snaps every named row at once. `stack` forwards to
+  `createCornerPanel` — useful for stacking the slider panel above or
+  below another corner-anchored block. Thin convenience over
   `createCornerPanel` + repeated `createSliderRow`.
 - `resetUI()` — removes every DOM node the library has attached.
   Templates should call this once after loading StrudelBreaks so
