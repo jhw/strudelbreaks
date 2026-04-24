@@ -313,7 +313,6 @@ function renderCaptures() {
     return;
   }
   capturesList.element.style.display = '';
-  const iw = String(banks.length - 1).length;
   for (let i = banks.length - 1; i >= 0; i--) {
     const bank = banks[i];
     const row = document.createElement('div');
@@ -321,7 +320,6 @@ function renderCaptures() {
     // row on one line and triggers horizontal scroll on overflow; icons
     // stay 16x16 because nothing flex-shrinks them.
 
-    row.appendChild(document.createTextNode(String(i).padStart(iw, ' ') + ' │ '));
     bank.forEach((c, j) => {
       if (j > 0) row.appendChild(document.createTextNode(' │ '));
       row.appendChild(patchSpan(c.sliders));
