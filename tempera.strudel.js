@@ -168,10 +168,33 @@ function patternHex(patternStr) {
 }
 // =============================
 
-// ===== LOG PANEL =====
+// ===== SLIDER PANEL =====
+// Custom sliders own currentSliders; pattern-graph signals read from
+// it via ref(() => …), which is exactly how Strudel's own slider() is
+// implemented under the hood. Anchored at bottom-right; the log panel
+// stacks above it.
 const currentSliders = { rootBreak: 0, altBreak: 0, pattern: 0, prob: 7 };
+const sliderPanel = SB.ui.createSliderPanel({
+  corner: 'bottom-right', id: 'slider-panel',
+  style: 'min-width:340px;max-width:520px',
+  format: SB.hex.hex2,
+  rows: [
+    { key: 'rootBreak', label: 'rootBreak', min: 0, max: names.length - 1, initial: currentSliders.rootBreak,
+      onChange: v => { currentSliders.rootBreak = v; log.tick(); } },
+    { key: 'altBreak',  label: 'altBreak',  min: 0, max: N_BREAKS - 1,     initial: currentSliders.altBreak,
+      onChange: v => { currentSliders.altBreak  = v; log.tick(); } },
+    { key: 'pattern',   label: 'pattern',   min: 0, max: N_PATTERNS - 1,   initial: currentSliders.pattern,
+      onChange: v => { currentSliders.pattern   = v; log.tick(); } },
+    { key: 'prob',      label: 'prob',      min: 0, max: N_PROBS - 1,      initial: currentSliders.prob,
+      onChange: v => { currentSliders.prob      = v; log.tick(); } },
+  ],
+});
+// ========================
+
+// ===== LOG PANEL =====
 const logPanel = SB.ui.createCornerPanel({
   corner: 'bottom-right', id: 'log-display',
+  stack: 'slider-panel',
   style: 'padding:12px 14px;max-width:520px;white-space:pre-wrap;cursor:text',
 });
 let currentBreak = '', currentPattern = '', lastPatch = '';
@@ -194,6 +217,7 @@ const log = {
   get break() { return currentBreak; },
   get pattern() { return currentPattern; },
 };
+renderLog();
 // =====================
 
 // ===== CAPTURES PANEL =====
@@ -328,39 +352,14 @@ capturesPanel.element.appendChild(listEl);
 renderCaptures();
 // ==========================
 
-// ===== PERFORMANCE CONTROLS =====
-// Custom sliders (top-left panel) own currentSliders; pattern-graph
-// signals read from it via ref(() => …), which is exactly how Strudel's
-// own slider() is implemented under the hood. delay stays as a native
-// Strudel slider — continuous float, not part of a patch.
-// Render the log once so its measured height (used by stack: below)
-// reflects real content, not just padding.
-renderLog();
-
-const sliderPanel = SB.ui.createSliderPanel({
-  corner: 'bottom-right', id: 'slider-panel',
-  style: 'min-width:340px;max-width:520px',
-  stack: 'log-display',
-  format: SB.hex.hex2,
-  rows: [
-    { key: 'rootBreak', label: 'rootBreak', min: 0, max: names.length - 1, initial: currentSliders.rootBreak,
-      onChange: v => { currentSliders.rootBreak = v; log.tick(); } },
-    { key: 'altBreak',  label: 'altBreak',  min: 0, max: N_BREAKS - 1,     initial: currentSliders.altBreak,
-      onChange: v => { currentSliders.altBreak  = v; log.tick(); } },
-    { key: 'pattern',   label: 'pattern',   min: 0, max: N_PATTERNS - 1,   initial: currentSliders.pattern,
-      onChange: v => { currentSliders.pattern   = v; log.tick(); } },
-    { key: 'prob',      label: 'prob',      min: 0, max: N_PROBS - 1,      initial: currentSliders.prob,
-      onChange: v => { currentSliders.prob      = v; log.tick(); } },
-  ],
-});
-
+// ===== PATTERN-GRAPH SIGNALS =====
 const delaySlider = slider(0.5, 0, 1, 0.01);
 
 const rootBreakSig = ref(() => currentSliders.rootBreak);
 const altBreakSig  = ref(() => currentSliders.altBreak);
 const patternSig   = ref(() => currentSliders.pattern);
 const probSig      = ref(() => currentSliders.prob);
-// ================================
+// =================================
 
 // ===== MAIN =====
 const breakStr = pick(rootBreakSig, breakStringsByRoot.map(row => pick(altBreakSig, row)));
