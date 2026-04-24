@@ -254,6 +254,32 @@
     return b;
   }
 
+  // Small ✕ icon with a circular dark-grey background, red-on-hover
+  // to cue a destructive action. No confirmation is wired — callers
+  // handle that (see deleteRow/deleteCell patterns in consumers).
+  const DELETE_ICON_BASE_STYLE = [
+    'cursor:pointer',
+    'display:inline-block',
+    'width:14px', 'height:14px', 'line-height:14px',
+    'text-align:center',
+    'border-radius:50%',
+    'background:#444', 'color:#bbb',
+    'font-size:10px',
+    'margin-left:4px',
+    'vertical-align:middle',
+  ].join(';');
+
+  function createDeleteIcon(onClick, { style = '' } = {}) {
+    const el = document.createElement('span');
+    el.dataset.strudelbreaks = '1';
+    el.textContent = '✕';
+    el.style.cssText = DELETE_ICON_BASE_STYLE + (style ? ';' + style : '');
+    el.addEventListener('mouseenter', () => { el.style.background = '#a33'; el.style.color = '#fff'; });
+    el.addEventListener('mouseleave', () => { el.style.background = '#444'; el.style.color = '#bbb'; });
+    el.addEventListener('click', onClick);
+    return el;
+  }
+
   // Integer-range DOM slider row: label + readout + native
   // <input type=range>. `format(v)` renders the readout (defaults to
   // decimal); `width` pins the readout width in ch (defaults to
@@ -422,7 +448,7 @@
     mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
     util:  { meanIndex, thinByUniforms },
     hex:   { hex2, hexPad, arrayHex },
-    ui:    { createCornerPanel, createButton, createSliderRow, createSliderPanel, resetUI },
+    ui:    { createCornerPanel, createButton, createDeleteIcon, createSliderRow, createSliderPanel, resetUI },
     store: { createPersistedStore, downloadBlob },
   };
 });

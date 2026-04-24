@@ -253,16 +253,6 @@ btnBar.style.cssText = 'display:flex;gap:4px;margin-bottom:6px;align-items:cente
 const listEl = document.createElement('div');
 listEl.style.cssText = 'overflow-y:auto;overflow-x:auto;white-space:pre;min-height:1.4em';
 
-function makeDeleteIcon(onClick) {
-  const el = document.createElement('span');
-  el.textContent = '✕';
-  el.style.cssText = 'cursor:pointer;display:inline-block;width:14px;height:14px;line-height:14px;text-align:center;border-radius:50%;background:#444;color:#bbb;font-size:10px;margin-left:4px;vertical-align:middle';
-  el.addEventListener('mouseenter', () => { el.style.background = '#a33'; el.style.color = '#fff'; });
-  el.addEventListener('mouseleave', () => { el.style.background = '#444'; el.style.color = '#bbb'; });
-  el.addEventListener('click', onClick);
-  return el;
-}
-
 function deleteRow(i) {
   if (!window.confirm('Delete row ' + i + '?')) return;
   capturesPayload.banks.splice(i, 1);
@@ -297,13 +287,13 @@ function renderCaptures() {
     banks[i].forEach((c, j) => {
       if (j > 0) left.appendChild(document.createTextNode('  '));
       left.appendChild(patchSpan(c.sliders));
-      left.appendChild(makeDeleteIcon(() => deleteCell(i, j)));
+      left.appendChild(SB.ui.createDeleteIcon(() => deleteCell(i, j)));
     });
     row.appendChild(left);
 
     const right = document.createElement('span');
     right.style.cssText = 'margin-left:auto;padding-left:20px';
-    right.appendChild(makeDeleteIcon(() => deleteRow(i)));
+    right.appendChild(SB.ui.createDeleteIcon(() => deleteRow(i)));
     row.appendChild(right);
 
     listEl.appendChild(row);
