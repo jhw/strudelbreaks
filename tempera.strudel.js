@@ -321,14 +321,14 @@ function renderCaptures() {
     // row on one line and triggers horizontal scroll on overflow; icons
     // stay 16x16 because nothing flex-shrinks them.
 
-    row.appendChild(document.createTextNode(String(i).padStart(iw, ' ')));
-    row.appendChild(SB.ui.createDeleteIcon(() => deleteRow(i)));
-    row.appendChild(document.createTextNode('│ '));
+    row.appendChild(document.createTextNode(String(i).padStart(iw, ' ') + ' │ '));
     bank.forEach((c, j) => {
       if (j > 0) row.appendChild(document.createTextNode(' │ '));
       row.appendChild(patchSpan(c.sliders));
       row.appendChild(SB.ui.createDeleteIcon(() => deleteCell(i, j)));
     });
+    row.appendChild(document.createTextNode(' │ ' + bank.length));
+    row.appendChild(SB.ui.createDeleteIcon(() => deleteRow(i)));
 
     listEl.appendChild(row);
   }
