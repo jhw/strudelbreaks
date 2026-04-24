@@ -133,18 +133,14 @@ const patternStringsByPattern = sequences.flatMap((seq) => {
 // ===== DOMAIN FORMATTERS =====
 const nameIndex = Object.fromEntries(names.map((n, i) => [n, i]));
 
-function patchForms(sliders) {
-  const vals = [sliders.rootBreak | 0, sliders.altBreak | 0, sliders.pattern | 0, sliders.prob | 0];
-  return { hex: vals.map(SB.hex.hex2).join(''), dec: vals.join('/') };
+function patchHex(sliders) {
+  return [sliders.rootBreak | 0, sliders.altBreak | 0, sliders.pattern | 0, sliders.prob | 0]
+    .map(SB.hex.hex2).join('');
 }
 
 function patchSpan(sliders) {
-  const { hex, dec } = patchForms(sliders);
   const s = document.createElement('span');
-  s.textContent = hex;
-  s.style.cursor = 'help';
-  s.addEventListener('mouseenter', () => { s.textContent = dec; });
-  s.addEventListener('mouseleave', () => { s.textContent = hex; });
+  s.textContent = patchHex(sliders);
   return s;
 }
 
@@ -181,7 +177,7 @@ const log = {
   setBreak: (s) => { if (s !== currentBreak) { currentBreak = s; renderLog(); } },
   setPattern: (s) => { if (s !== currentPattern) { currentPattern = s; renderLog(); } },
   tick: () => {
-    const p = patchForms(currentSliders).hex;
+    const p = patchHex(currentSliders);
     if (p !== lastPatch) { lastPatch = p; renderLog(); }
   },
   get break() { return currentBreak; },
@@ -291,8 +287,9 @@ renderCaptures();
 // own slider() is implemented under the hood. delay stays as a native
 // Strudel slider — continuous float, not part of a patch.
 const sliderPanel = SB.ui.createSliderPanel({
-  corner: 'top-left', id: 'slider-panel',
-  style: 'min-width:340px',
+  corner: 'bottom-right', id: 'slider-panel',
+  style: 'bottom:110px;min-width:340px;max-width:520px',
+  format: SB.hex.hex2,
   rows: [
     { key: 'rootBreak', label: 'rootBreak', min: 0, max: names.length - 1, initial: currentSliders.rootBreak,
       onChange: v => { currentSliders.rootBreak = v; log.tick(); } },

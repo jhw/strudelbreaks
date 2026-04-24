@@ -111,17 +111,20 @@ at the edge (for Strudel's `mini()` / `fmap(mini).innerJoin()` dance).
   `setText` for plain-text HUDs.
 - `createButton(label, onClick, { style? })` → `HTMLButtonElement` with
   the house style.
-- `createSliderRow({ label, min, max, initial?, step?, onChange })` →
-  `{ element, setValue, getValue }`. Flex row: label + decimal readout
-  + native `<input type=range>`. `onChange(v|0)` fires on user drag;
-  `setValue(v)` syncs thumb + readout without firing `onChange`, so a
-  caller that already owns the authoritative value can snap without
-  feedback loops.
-- `createSliderPanel({ corner, id, style?, rows })` →
+- `createSliderRow({ label, min, max, initial?, step?, onChange, format?, width? })` →
+  `{ element, setValue, getValue }`. Flex row: label + readout +
+  native `<input type=range>`. `format(v)` renders the readout
+  (defaults to decimal); `width` pins the readout width in `ch`.
+  `onChange(v|0)` fires on user drag; `setValue(v)` syncs thumb +
+  readout without firing `onChange`, so a caller that already owns the
+  authoritative value can snap without feedback loops.
+- `createSliderPanel({ corner, id, style?, rows, format? })` →
   `{ element, rows, setAll }`. Corner panel containing N slider rows
-  keyed by `row.key`. `setAll({ key: value, … })` snaps every named
-  row at once. Thin convenience over `createCornerPanel` + repeated
-  `createSliderRow`.
+  keyed by `row.key`. A panel-level `format` applies to every row, and
+  the panel computes a uniform readout width from it so all rows
+  align on the left edge of the range input. `setAll({ key: value, … })`
+  snaps every named row at once. Thin convenience over
+  `createCornerPanel` + repeated `createSliderRow`.
 - `resetUI()` — removes every DOM node the library has attached.
   Templates should call this once after loading StrudelBreaks so
   widgets from a previously-pasted script don't linger. Every element

@@ -234,12 +234,17 @@
     return b;
   }
 
-  // Integer-range DOM slider row: label + decimal readout + native
-  // <input type=range>. Consumer supplies onChange — setValue syncs the
-  // thumb + readout without firing onChange, so callers that already
-  // own the authoritative value can snap without feedback loops.
-  function createSliderRow({ label, min, max, initial = min, step = 1, onChange }) {
-    const width = String(Math.max(Math.abs(min), Math.abs(max))).length;
+  // Integer-range DOM slider row: label + readout + native
+  // <input type=range>. `format(v)` renders the readout (defaults to
+  // decimal); `width` pins the readout width in ch (defaults to
+  // max(format(min).length, format(max).length)) so a panel can align
+  // multiple rows. `onChange(v|0)` fires on drag; setValue syncs thumb
+  // + readout without firing onChange, so a caller that already owns
+  // the authoritative value can snap without feedback loops.
+  function createSliderRow({ label, min, max, initial = min, step = 1, onChange, format, width }) {
+    const fmt = format || ((v) => String(v | 0));
+    const w = width != null ? width : Math.max(fmt(min).length, fmt(max).length);
+
     const row = document.createElement('div');
     row.dataset.strudelbreaks = '1';
     row.style.cssText = 'display:flex;align-items:center;gap:8px;margin:2px 0';
@@ -249,7 +254,7 @@
     labelEl.style.cssText = 'min-width:72px';
 
     const readoutEl = document.createElement('span');
-    readoutEl.style.cssText = 'min-width:' + (width + 0.5) + 'ch;text-align:right;font-variant-numeric:tabular-nums';
+    readoutEl.style.cssText = 'min-width:' + w + 'ch;text-align:right;font-variant-numeric:tabular-nums';
 
     const input = document.createElement('input');
     input.type = 'range';
@@ -260,7 +265,7 @@
     input.style.cssText = 'flex:1;accent-color:#0f0;background:transparent;cursor:pointer';
 
     function updateReadout() {
-      readoutEl.textContent = String(input.valueAsNumber | 0).padStart(width, ' ');
+      readoutEl.textContent = fmt(input.valueAsNumber | 0).padStart(w, ' ');
     }
     updateReadout();
 
@@ -282,15 +287,23 @@
     };
   }
 
-  // Convenience: corner panel + N slider rows keyed by row.key.
-  // `setAll({ key: value, … })` snaps every named row at once without
-  // firing onChange.
-  function createSliderPanel({ corner, id, style = '', rows }) {
+  // Convenience: corner panel + N slider rows keyed by row.key. An
+  // optional panel-level `format` applies to every row (and the panel
+  // computes a uniform readout width from it so all rows align on the
+  // left edge of the range input). `setAll({ key: value, … })` snaps
+  // every named row at once without firing onChange.
+  function createSliderPanel({ corner, id, style = '', rows, format }) {
+    const fmtFallback = (v) => String(v | 0);
+    const widthOf = (f) => Math.max(...rows.flatMap(r => [f(r.min).length, f(r.max).length]));
+    const uniformWidth = widthOf(format || fmtFallback);
+
     const panel = createCornerPanel({ corner, id, style });
     const sliderRows = {};
     for (const cfg of rows) {
       if (!cfg.key) throw new Error('[strudelbreaks] createSliderPanel row missing key');
-      const sr = createSliderRow(cfg);
+      const rowCfg = { ...cfg, width: uniformWidth };
+      if (format && !cfg.format) rowCfg.format = format;
+      const sr = createSliderRow(rowCfg);
       sliderRows[cfg.key] = sr;
       panel.element.appendChild(sr.element);
     }
