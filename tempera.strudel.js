@@ -227,7 +227,7 @@ listEl.style.cssText = 'overflow-y:auto;overflow-x:auto;white-space:pre;min-heig
 function renderCaptures() {
   listEl.textContent = '';
   const banks = capturesPayload.banks;
-  if (banks.length === 0) { listEl.textContent = '(no captures)'; return; }
+  if (banks.length === 0) return;
   const iw = String(banks.length - 1).length;
   for (let i = banks.length - 1; i >= 0; i--) {
     const row = document.createElement('div');
