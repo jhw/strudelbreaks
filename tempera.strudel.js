@@ -293,6 +293,7 @@ function renderCaptures() {
 
     const right = document.createElement('span');
     right.style.cssText = 'margin-left:auto;padding-left:20px';
+    right.appendChild(document.createTextNode('│'));
     right.appendChild(SB.ui.createDeleteIcon(() => deleteRow(i)));
     row.appendChild(right);
 
