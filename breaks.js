@@ -260,14 +260,25 @@
   // `disabled`, the button renders dimmer, takes no click, and shows
   // no hover response — callers still render it so layout stays stable
   // at list boundaries.
+  // inline-flex + align/justify:center puts the glyph's bounding box
+  // dead centre regardless of font baseline quirks — ASCII '<' '>' 'x'
+  // all land in the same visual spot, which text-align + line-height
+  // tricks on inline-block can't guarantee. Symmetric horizontal margin
+  // so neighbouring glyphs/text sit evenly on both sides.
   const ICON_BUTTON_BASE_STYLE = [
-    'display:inline-block',
-    'width:14px', 'height:14px', 'line-height:14px',
-    'text-align:center',
+    'display:inline-flex',
+    'align-items:center',
+    'justify-content:center',
+    'box-sizing:border-box',
+    'width:16px', 'height:16px',
     'border-radius:50%',
-    'font-size:10px',
-    'margin-left:4px',
+    'font-family:ui-monospace,Menlo,Consolas,monospace',
+    'font-size:11px',
+    'font-weight:bold',
+    'margin:0 3px',
     'vertical-align:middle',
+    'user-select:none',
+    '-webkit-user-select:none',
   ].join(';');
 
   function createIconButton(glyph, onClick, {
@@ -295,7 +306,7 @@
   // Red-hover preset over createIconButton for destructive actions.
   // No confirmation is wired — callers handle that at the domain layer.
   function createDeleteIcon(onClick, { style = '' } = {}) {
-    return createIconButton('✕', onClick, { hoverBg: '#a33', hoverColor: '#fff', style });
+    return createIconButton('x', onClick, { hoverBg: '#a33', hoverColor: '#fff', style });
   }
 
   // Integer-range DOM slider row: label + readout + native

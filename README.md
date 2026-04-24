@@ -123,10 +123,11 @@ at the edge (for Strudel's `mini()` / `fmap(mini).innerJoin()` dance).
   and neutral (green) actions; defaults are red-on-hover. When
   `disabled`, the button renders dimmer, takes no click, and shows no
   hover response — callers still render it so layout stays stable at
-  list boundaries (e.g. a `◀` move-left arrow on the first cell of a
-  row).
-- `createDeleteIcon(onClick, { style? })` → red-hover preset over
-  `createIconButton` for `✕` destructive actions. No confirmation is
+  list boundaries (e.g. a `<` move-left arrow on the first cell of a
+  row). Uses `inline-flex` centring so plain ASCII glyphs (`<`, `>`,
+  `x`) land optically centred regardless of font baseline quirks.
+- `createDeleteIcon(onClick, { style? })` → red-hover `x` preset over
+  `createIconButton` for destructive actions. No confirmation is
   wired — callers handle that at the domain layer.
 - `createSliderRow({ label, min, max, initial?, step?, onChange, format?, width? })` →
   `{ element, setValue, getValue }`. Flex row: label + readout +

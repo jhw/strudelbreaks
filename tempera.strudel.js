@@ -292,24 +292,18 @@ function renderCaptures() {
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center';
 
-    const left = document.createElement('span');
-    left.appendChild(document.createTextNode(String(i).padStart(iw, ' ') + ' │ '));
+    row.appendChild(document.createTextNode(String(i).padStart(iw, ' ')));
+    row.appendChild(SB.ui.createDeleteIcon(() => deleteRow(i)));
+    row.appendChild(document.createTextNode('│ '));
     bank.forEach((c, j) => {
-      if (j > 0) left.appendChild(document.createTextNode(' │ '));
-      left.appendChild(SB.ui.createIconButton('◀', () => moveCell(i, j, -1),
+      if (j > 0) row.appendChild(document.createTextNode(' │ '));
+      row.appendChild(SB.ui.createIconButton('<', () => moveCell(i, j, -1),
         { ...moveOpts, disabled: j === 0 }));
-      left.appendChild(patchSpan(c.sliders));
-      left.appendChild(SB.ui.createIconButton('▶', () => moveCell(i, j, +1),
+      row.appendChild(patchSpan(c.sliders));
+      row.appendChild(SB.ui.createIconButton('>', () => moveCell(i, j, +1),
         { ...moveOpts, disabled: j === bank.length - 1 }));
-      left.appendChild(SB.ui.createDeleteIcon(() => deleteCell(i, j)));
+      row.appendChild(SB.ui.createDeleteIcon(() => deleteCell(i, j)));
     });
-    row.appendChild(left);
-
-    const right = document.createElement('span');
-    right.style.cssText = 'margin-left:auto;padding-left:20px';
-    right.appendChild(document.createTextNode('│'));
-    right.appendChild(SB.ui.createDeleteIcon(() => deleteRow(i)));
-    row.appendChild(right);
 
     listEl.appendChild(row);
   }
