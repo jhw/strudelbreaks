@@ -224,6 +224,30 @@ btnBar.style.cssText = 'display:flex;gap:4px;margin-bottom:6px;align-items:cente
 const listEl = document.createElement('div');
 listEl.style.cssText = 'overflow-y:auto;overflow-x:auto;white-space:pre;min-height:1.4em';
 
+function makeDeleteIcon(onClick) {
+  const el = document.createElement('span');
+  el.textContent = '✕';
+  el.style.cssText = 'cursor:pointer;opacity:0.4;margin-left:2px';
+  el.addEventListener('mouseenter', () => { el.style.opacity = '1'; });
+  el.addEventListener('mouseleave', () => { el.style.opacity = '0.4'; });
+  el.addEventListener('click', onClick);
+  return el;
+}
+
+function deleteRow(i) {
+  if (!window.confirm('Delete row ' + i + '?')) return;
+  capturesPayload.banks.splice(i, 1);
+  capturesStore.set(capturesPayload);
+  renderCaptures();
+}
+
+function deleteCell(i, j) {
+  if (!window.confirm('Delete this pattern?')) return;
+  capturesPayload.banks[i].splice(j, 1);
+  capturesStore.set(capturesPayload);
+  renderCaptures();
+}
+
 function renderCaptures() {
   listEl.textContent = '';
   const banks = capturesPayload.banks;
@@ -231,11 +255,23 @@ function renderCaptures() {
   const iw = String(banks.length - 1).length;
   for (let i = banks.length - 1; i >= 0; i--) {
     const row = document.createElement('div');
-    row.appendChild(document.createTextNode(String(i).padStart(iw, ' ') + ' │ '));
+    row.style.cssText = 'display:flex;align-items:baseline';
+
+    const left = document.createElement('span');
+    left.appendChild(document.createTextNode(String(i).padStart(iw, ' ') + ' │ '));
     banks[i].forEach((c, j) => {
-      if (j > 0) row.appendChild(document.createTextNode('  '));
-      row.appendChild(patchSpan(c.sliders));
+      if (j > 0) left.appendChild(document.createTextNode('  '));
+      left.appendChild(patchSpan(c.sliders));
+      left.appendChild(makeDeleteIcon(() => deleteCell(i, j)));
     });
+    row.appendChild(left);
+
+    const right = document.createElement('span');
+    right.style.marginLeft = 'auto';
+    right.appendChild(document.createTextNode(' │ '));
+    right.appendChild(makeDeleteIcon(() => deleteRow(i)));
+    row.appendChild(right);
+
     listEl.appendChild(row);
   }
 }
