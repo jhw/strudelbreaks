@@ -141,7 +141,18 @@ function patchHex(sliders) {
 function patchSpan(sliders) {
   const s = document.createElement('span');
   s.textContent = patchHex(sliders);
+  s.style.cursor = 'pointer';
+  s.addEventListener('click', () => snapTo(sliders));
   return s;
+}
+
+function snapTo(sliders) {
+  currentSliders.rootBreak = sliders.rootBreak | 0;
+  currentSliders.altBreak  = sliders.altBreak  | 0;
+  currentSliders.pattern   = sliders.pattern   | 0;
+  currentSliders.prob      = sliders.prob      | 0;
+  sliderPanel.setAll(currentSliders);
+  log.tick();
 }
 
 function breakHex(breakStr) {
