@@ -234,6 +234,78 @@
     return b;
   }
 
+  // Integer-range DOM slider row: label + decimal readout + native
+  // <input type=range>. Consumer supplies onChange — setValue syncs the
+  // thumb + readout without firing onChange, so callers that already
+  // own the authoritative value can snap without feedback loops.
+  function createSliderRow({ label, min, max, initial = min, step = 1, onChange }) {
+    const width = String(Math.max(Math.abs(min), Math.abs(max))).length;
+    const row = document.createElement('div');
+    row.dataset.strudelbreaks = '1';
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;margin:2px 0';
+
+    const labelEl = document.createElement('span');
+    labelEl.textContent = label;
+    labelEl.style.cssText = 'min-width:72px';
+
+    const readoutEl = document.createElement('span');
+    readoutEl.style.cssText = 'min-width:' + (width + 0.5) + 'ch;text-align:right;font-variant-numeric:tabular-nums';
+
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.value = String(initial);
+    input.style.cssText = 'flex:1;accent-color:#0f0;background:transparent;cursor:pointer';
+
+    function updateReadout() {
+      readoutEl.textContent = String(input.valueAsNumber | 0).padStart(width, ' ');
+    }
+    updateReadout();
+
+    input.addEventListener('input', () => {
+      updateReadout();
+      if (onChange) onChange(input.valueAsNumber | 0);
+    });
+
+    row.appendChild(labelEl);
+    row.appendChild(readoutEl);
+    row.appendChild(input);
+    return {
+      element: row,
+      setValue(v) {
+        input.value = String(v);
+        updateReadout();
+      },
+      getValue() { return input.valueAsNumber | 0; },
+    };
+  }
+
+  // Convenience: corner panel + N slider rows keyed by row.key.
+  // `setAll({ key: value, … })` snaps every named row at once without
+  // firing onChange.
+  function createSliderPanel({ corner, id, style = '', rows }) {
+    const panel = createCornerPanel({ corner, id, style });
+    const sliderRows = {};
+    for (const cfg of rows) {
+      if (!cfg.key) throw new Error('[strudelbreaks] createSliderPanel row missing key');
+      const sr = createSliderRow(cfg);
+      sliderRows[cfg.key] = sr;
+      panel.element.appendChild(sr.element);
+    }
+    return {
+      element: panel.element,
+      rows: sliderRows,
+      setAll(values) {
+        for (const key of Object.keys(values)) {
+          const r = sliderRows[key];
+          if (r) r.setValue(values[key]);
+        }
+      },
+    };
+  }
+
   // Remove every DOM node the library has ever attached. Templates
   // should call this once after loading StrudelBreaks, before building
   // fresh widgets — otherwise panels from a previously-loaded template
@@ -317,7 +389,7 @@
     mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
     util:  { meanIndex, thinByUniforms },
     hex:   { hex2, hexPad, arrayHex },
-    ui:    { createCornerPanel, createButton, resetUI },
+    ui:    { createCornerPanel, createButton, createSliderRow, createSliderPanel, resetUI },
     store: { createPersistedStore, downloadBlob },
   };
 });

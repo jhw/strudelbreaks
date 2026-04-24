@@ -286,19 +286,31 @@ renderCaptures();
 // ==========================
 
 // ===== PERFORMANCE CONTROLS =====
-// Slider ranges must be numeric literals (Strudel scans source text to
-// render the UI before evaluating). 255 == N_PATTERNS - 1; keep in sync
-// with CONFIG.
-const rootBreakSlider = slider(0, 0, 15, 1);
-const altBreakSlider = slider(0, 0, 63, 1);
-const patternSlider = slider(0, 0, 255, 1);
-const probSlider = slider(7, 0, 7, 1);
+// Custom sliders (top-left panel) own currentSliders; pattern-graph
+// signals read from it via ref(() => …), which is exactly how Strudel's
+// own slider() is implemented under the hood. delay stays as a native
+// Strudel slider — continuous float, not part of a patch.
+const sliderPanel = SB.ui.createSliderPanel({
+  corner: 'top-left', id: 'slider-panel',
+  style: 'min-width:340px',
+  rows: [
+    { key: 'rootBreak', label: 'rootBreak', min: 0, max: names.length - 1, initial: currentSliders.rootBreak,
+      onChange: v => { currentSliders.rootBreak = v; log.tick(); } },
+    { key: 'altBreak',  label: 'altBreak',  min: 0, max: N_BREAKS - 1,     initial: currentSliders.altBreak,
+      onChange: v => { currentSliders.altBreak  = v; log.tick(); } },
+    { key: 'pattern',   label: 'pattern',   min: 0, max: N_PATTERNS - 1,   initial: currentSliders.pattern,
+      onChange: v => { currentSliders.pattern   = v; log.tick(); } },
+    { key: 'prob',      label: 'prob',      min: 0, max: N_PROBS - 1,      initial: currentSliders.prob,
+      onChange: v => { currentSliders.prob      = v; log.tick(); } },
+  ],
+});
+
 const delaySlider = slider(0.5, 0, 1, 0.01);
 
-const rootBreakSig = rootBreakSlider.withValue(v => { currentSliders.rootBreak = v | 0; log.tick(); return v; });
-const altBreakSig = altBreakSlider.withValue(v => { currentSliders.altBreak = v | 0; log.tick(); return v; });
-const patternSig = patternSlider.withValue(v => { currentSliders.pattern = v | 0; log.tick(); return v; });
-const probSig = probSlider.withValue(v => { currentSliders.prob = v | 0; log.tick(); return v; });
+const rootBreakSig = ref(() => currentSliders.rootBreak);
+const altBreakSig  = ref(() => currentSliders.altBreak);
+const patternSig   = ref(() => currentSliders.pattern);
+const probSig      = ref(() => currentSliders.prob);
 // ================================
 
 // ===== MAIN =====

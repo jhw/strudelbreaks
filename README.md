@@ -49,7 +49,7 @@ window.StrudelBreaks = {
   mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
   util:  { meanIndex, thinByUniforms },
   hex:   { hex2, hexPad, arrayHex },
-  ui:    { createCornerPanel, createButton, resetUI },
+  ui:    { createCornerPanel, createButton, createSliderRow, createSliderPanel, resetUI },
   store: { createPersistedStore, downloadBlob },
 };
 ```
@@ -111,6 +111,17 @@ at the edge (for Strudel's `mini()` / `fmap(mini).innerJoin()` dance).
   `setText` for plain-text HUDs.
 - `createButton(label, onClick, { style? })` → `HTMLButtonElement` with
   the house style.
+- `createSliderRow({ label, min, max, initial?, step?, onChange })` →
+  `{ element, setValue, getValue }`. Flex row: label + decimal readout
+  + native `<input type=range>`. `onChange(v|0)` fires on user drag;
+  `setValue(v)` syncs thumb + readout without firing `onChange`, so a
+  caller that already owns the authoritative value can snap without
+  feedback loops.
+- `createSliderPanel({ corner, id, style?, rows })` →
+  `{ element, rows, setAll }`. Corner panel containing N slider rows
+  keyed by `row.key`. `setAll({ key: value, … })` snaps every named
+  row at once. Thin convenience over `createCornerPanel` + repeated
+  `createSliderRow`.
 - `resetUI()` — removes every DOM node the library has attached.
   Templates should call this once after loading StrudelBreaks so
   widgets from a previously-pasted script don't linger. Every element
