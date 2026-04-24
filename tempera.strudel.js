@@ -18,6 +18,7 @@ const EVENTS_PER_CYCLE = 8;
 const N_BREAKS = 64;
 const N_SEQUENCES = 64;
 const N_PATTERN_MODES = 4;
+
 const N_PATTERNS = N_SEQUENCES * N_PATTERN_MODES;
 const N_PROBS = 8;
 
@@ -141,7 +142,10 @@ function patchHex(sliders) {
 function patchSpan(sliders) {
   const s = document.createElement('span');
   s.textContent = patchHex(sliders);
-  s.style.cursor = 'pointer';
+  // Asymmetric padding compensates for the font bias that makes a '<'
+  // icon look closer to the first hex digit than the '>' icon does to
+  // the last. Extra space on the left only — tuned by eye.
+  s.style.cssText = 'cursor:pointer;padding:0 0 0 3px';
   s.addEventListener('click', () => snapTo(sliders));
   return s;
 }
