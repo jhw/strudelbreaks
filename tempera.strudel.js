@@ -173,7 +173,12 @@ function patternHex(patternStr) {
 // it via ref(() => …), which is exactly how Strudel's own slider() is
 // implemented under the hood. Anchored at bottom-right; the log panel
 // stacks above it.
-const currentSliders = { rootBreak: 0, altBreak: 0, pattern: 0, prob: 7 };
+const currentSliders = {
+  rootBreak: names.length - 1,
+  altBreak:  N_BREAKS - 1,
+  pattern:   N_PATTERNS - 1,
+  prob:      N_PROBS - 1,
+};
 const sliderPanel = SB.ui.createSliderPanel({
   corner: 'bottom-right', id: 'slider-panel',
   style: 'min-width:340px;max-width:520px',
@@ -251,9 +256,9 @@ listEl.style.cssText = 'overflow-y:auto;overflow-x:auto;white-space:pre;min-heig
 function makeDeleteIcon(onClick) {
   const el = document.createElement('span');
   el.textContent = '✕';
-  el.style.cssText = 'cursor:pointer;opacity:0.4;margin-left:2px';
-  el.addEventListener('mouseenter', () => { el.style.opacity = '1'; });
-  el.addEventListener('mouseleave', () => { el.style.opacity = '0.4'; });
+  el.style.cssText = 'cursor:pointer;display:inline-block;width:14px;height:14px;line-height:14px;text-align:center;border-radius:50%;background:#444;color:#bbb;font-size:10px;margin-left:4px;vertical-align:middle';
+  el.addEventListener('mouseenter', () => { el.style.background = '#a33'; el.style.color = '#fff'; });
+  el.addEventListener('mouseleave', () => { el.style.background = '#444'; el.style.color = '#bbb'; });
   el.addEventListener('click', onClick);
   return el;
 }
@@ -275,11 +280,17 @@ function deleteCell(i, j) {
 function renderCaptures() {
   listEl.textContent = '';
   const banks = capturesPayload.banks;
-  if (banks.length === 0) return;
+  if (banks.length === 0) {
+    listEl.style.display = 'none';
+    btnBar.style.marginBottom = '0';
+    return;
+  }
+  listEl.style.display = '';
+  btnBar.style.marginBottom = '6px';
   const iw = String(banks.length - 1).length;
   for (let i = banks.length - 1; i >= 0; i--) {
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:baseline';
+    row.style.cssText = 'display:flex;align-items:center';
 
     const left = document.createElement('span');
     left.appendChild(document.createTextNode(String(i).padStart(iw, ' ') + ' │ '));
@@ -291,8 +302,7 @@ function renderCaptures() {
     row.appendChild(left);
 
     const right = document.createElement('span');
-    right.style.marginLeft = 'auto';
-    right.appendChild(document.createTextNode(' │ '));
+    right.style.cssText = 'margin-left:auto;padding-left:20px';
     right.appendChild(makeDeleteIcon(() => deleteRow(i)));
     row.appendChild(right);
 
