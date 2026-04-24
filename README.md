@@ -49,7 +49,7 @@ window.StrudelBreaks = {
   mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
   util:  { meanIndex, thinByUniforms },
   hex:   { hex2, hexPad, arrayHex },
-  ui:    { createCornerPanel, createButton, createDeleteIcon, createSliderRow, createSliderPanel, resetUI },
+  ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createSliderRow, createSliderPanel, resetUI },
   store: { createPersistedStore, downloadBlob },
 };
 ```
@@ -117,9 +117,17 @@ at the edge (for Strudel's `mini()` / `fmap(mini).innerJoin()` dance).
   its final content at call time; measurement is one-shot.
 - `createButton(label, onClick, { style? })` → `HTMLButtonElement` with
   the house style.
-- `createDeleteIcon(onClick, { style? })` → a small `✕` inside a
-  dark-grey circle, red-on-hover to cue a destructive action. No
-  confirmation is wired — callers handle that at the domain layer.
+- `createIconButton(glyph, onClick, { hoverBg?, hoverColor?, disabled?, style? })` →
+  a small single-glyph span inside a dark-grey circle. Hover colours
+  are caller-supplied so the same primitive covers destructive (red)
+  and neutral (green) actions; defaults are red-on-hover. When
+  `disabled`, the button renders dimmer, takes no click, and shows no
+  hover response — callers still render it so layout stays stable at
+  list boundaries (e.g. a `◀` move-left arrow on the first cell of a
+  row).
+- `createDeleteIcon(onClick, { style? })` → red-hover preset over
+  `createIconButton` for `✕` destructive actions. No confirmation is
+  wired — callers handle that at the domain layer.
 - `createSliderRow({ label, min, max, initial?, step?, onChange, format?, width? })` →
   `{ element, setValue, getValue }`. Flex row: label + readout +
   native `<input type=range>`. `format(v)` renders the readout

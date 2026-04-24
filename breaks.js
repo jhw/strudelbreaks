@@ -254,30 +254,48 @@
     return b;
   }
 
-  // Small ✕ icon with a circular dark-grey background, red-on-hover
-  // to cue a destructive action. No confirmation is wired — callers
-  // handle that (see deleteRow/deleteCell patterns in consumers).
-  const DELETE_ICON_BASE_STYLE = [
-    'cursor:pointer',
+  // Small single-glyph icon button inside a circular dark-grey
+  // background. Hover colours are caller-supplied so the same primitive
+  // covers destructive (red) and neutral (green) actions. When
+  // `disabled`, the button renders dimmer, takes no click, and shows
+  // no hover response — callers still render it so layout stays stable
+  // at list boundaries.
+  const ICON_BUTTON_BASE_STYLE = [
     'display:inline-block',
     'width:14px', 'height:14px', 'line-height:14px',
     'text-align:center',
     'border-radius:50%',
-    'background:#444', 'color:#bbb',
     'font-size:10px',
     'margin-left:4px',
     'vertical-align:middle',
   ].join(';');
 
-  function createDeleteIcon(onClick, { style = '' } = {}) {
+  function createIconButton(glyph, onClick, {
+    hoverBg = '#a33', hoverColor = '#fff',
+    disabled = false, style = '',
+  } = {}) {
     const el = document.createElement('span');
     el.dataset.strudelbreaks = '1';
-    el.textContent = '✕';
-    el.style.cssText = DELETE_ICON_BASE_STYLE + (style ? ';' + style : '');
-    el.addEventListener('mouseenter', () => { el.style.background = '#a33'; el.style.color = '#fff'; });
-    el.addEventListener('mouseleave', () => { el.style.background = '#444'; el.style.color = '#bbb'; });
-    el.addEventListener('click', onClick);
+    el.textContent = glyph;
+    const baseBg = disabled ? '#2a2a2a' : '#444';
+    const baseColor = disabled ? '#666' : '#bbb';
+    el.style.cssText = ICON_BUTTON_BASE_STYLE
+      + ';cursor:' + (disabled ? 'default' : 'pointer')
+      + ';background:' + baseBg
+      + ';color:' + baseColor
+      + (style ? ';' + style : '');
+    if (!disabled) {
+      el.addEventListener('mouseenter', () => { el.style.background = hoverBg; el.style.color = hoverColor; });
+      el.addEventListener('mouseleave', () => { el.style.background = baseBg; el.style.color = baseColor; });
+      el.addEventListener('click', onClick);
+    }
     return el;
+  }
+
+  // Red-hover preset over createIconButton for destructive actions.
+  // No confirmation is wired — callers handle that at the domain layer.
+  function createDeleteIcon(onClick, { style = '' } = {}) {
+    return createIconButton('✕', onClick, { hoverBg: '#a33', hoverColor: '#fff', style });
   }
 
   // Integer-range DOM slider row: label + readout + native
@@ -448,7 +466,7 @@
     mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
     util:  { meanIndex, thinByUniforms },
     hex:   { hex2, hexPad, arrayHex },
-    ui:    { createCornerPanel, createButton, createDeleteIcon, createSliderRow, createSliderPanel, resetUI },
+    ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createSliderRow, createSliderPanel, resetUI },
     store: { createPersistedStore, downloadBlob },
   };
 });

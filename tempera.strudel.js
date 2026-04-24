@@ -261,8 +261,16 @@ function deleteRow(i) {
 }
 
 function deleteCell(i, j) {
-  if (!window.confirm('Delete this pattern?')) return;
   capturesPayload.banks[i].splice(j, 1);
+  capturesStore.set(capturesPayload);
+  renderCaptures();
+}
+
+function moveCell(i, j, delta) {
+  const bank = capturesPayload.banks[i];
+  const k = j + delta;
+  if (k < 0 || k >= bank.length) return;
+  [bank[j], bank[k]] = [bank[k], bank[j]];
   capturesStore.set(capturesPayload);
   renderCaptures();
 }
@@ -278,15 +286,21 @@ function renderCaptures() {
   listEl.style.display = '';
   btnBar.style.marginBottom = '6px';
   const iw = String(banks.length - 1).length;
+  const moveOpts = { hoverBg: '#0a0', hoverColor: '#000' };
   for (let i = banks.length - 1; i >= 0; i--) {
+    const bank = banks[i];
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center';
 
     const left = document.createElement('span');
     left.appendChild(document.createTextNode(String(i).padStart(iw, ' ') + ' │ '));
-    banks[i].forEach((c, j) => {
-      if (j > 0) left.appendChild(document.createTextNode('  '));
+    bank.forEach((c, j) => {
+      if (j > 0) left.appendChild(document.createTextNode(' │ '));
+      left.appendChild(SB.ui.createIconButton('◀', () => moveCell(i, j, -1),
+        { ...moveOpts, disabled: j === 0 }));
       left.appendChild(patchSpan(c.sliders));
+      left.appendChild(SB.ui.createIconButton('▶', () => moveCell(i, j, +1),
+        { ...moveOpts, disabled: j === bank.length - 1 }));
       left.appendChild(SB.ui.createDeleteIcon(() => deleteCell(i, j)));
     });
     row.appendChild(left);
@@ -333,20 +347,12 @@ function newRow() {
   renderCaptures();
 }
 
-function clearAll() {
-  if (!window.confirm('Clear all captures for this gist?')) return;
-  capturesStore.clear();
-  capturesPayload = { schema: SCHEMA_VERSION, context: captureContext, banks: [] };
-  renderCaptures();
-}
-
 btnBar.appendChild(SB.ui.createButton('new row', newRow));
 btnBar.appendChild(SB.ui.createButton('add cell', addCell));
 const spacer = document.createElement('span');
 spacer.style.cssText = 'flex:1';
 btnBar.appendChild(spacer);
 btnBar.appendChild(SB.ui.createButton('export', () => capturesStore.exportAsFile('tempera-captures-' + gistId)));
-btnBar.appendChild(SB.ui.createButton('clear', clearAll));
 
 capturesPanel.element.appendChild(btnBar);
 capturesPanel.element.appendChild(listEl);
