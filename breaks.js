@@ -204,7 +204,9 @@
   // the corner edge margin so vertically-stacked blocks have the same
   // spacing as the margin to the viewport edge. The ref panel must
   // already be in the DOM with its final content at call time —
-  // measurement is one-shot via offsetHeight.
+  // measurement is one-shot via getBoundingClientRect, which gives the
+  // ref's real viewport position rather than just its height, so chains
+  // deeper than one level stack correctly.
   function createCornerPanel({ corner, id, style = '', stack }) {
     const pos = CORNER_STYLES[corner];
     if (!pos) throw new Error('[strudelbreaks] unknown corner: ' + corner);
@@ -222,8 +224,12 @@
       if (!refEl) {
         console.warn('[strudelbreaks] stack ref "' + stack + '" not found; ignoring');
       } else {
-        const offset = PANEL_GAP + refEl.offsetHeight + PANEL_GAP;
-        stackStyle = (corner.startsWith('bottom') ? 'bottom:' : 'top:') + offset + 'px';
+        const rect = refEl.getBoundingClientRect();
+        if (corner.startsWith('bottom')) {
+          stackStyle = 'bottom:' + (window.innerHeight - rect.top + PANEL_GAP) + 'px';
+        } else {
+          stackStyle = 'top:' + (rect.bottom + PANEL_GAP) + 'px';
+        }
       }
     }
     element.style.cssText = PANEL_BASE_STYLE + ';' + pos
@@ -309,6 +315,20 @@
   // No confirmation is wired — callers handle that at the domain layer.
   function createDeleteIcon(onClick, { style = '' } = {}) {
     return createIconButton('x', onClick, { hoverBg: '#a33', hoverColor: '#fff', style });
+  }
+
+  // Thin convenience over createCornerPanel: a flex row of buttons as
+  // its own corner-anchored widget, so a template can split toolbars
+  // into multiple independently-positioned bars. `buttons` is an array
+  // of pre-built elements (typically from createButton / createIconButton)
+  // appended in order. Tighter default padding than a general panel so
+  // the bar looks like a bar, not a panel.
+  function createButtonBar({ corner, id, style = '', stack, buttons }) {
+    const barStyle = 'display:flex;gap:4px;align-items:center;padding:6px 10px'
+      + (style ? ';' + style : '');
+    const panel = createCornerPanel({ corner, id, style: barStyle, stack });
+    for (const btn of buttons) panel.element.appendChild(btn);
+    return { element: panel.element };
   }
 
   // Integer-range DOM slider row: label + readout + native
@@ -479,7 +499,7 @@
     mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
     util:  { meanIndex, thinByUniforms },
     hex:   { hex2, hexPad, arrayHex },
-    ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createSliderRow, createSliderPanel, resetUI },
+    ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createSliderRow, createSliderPanel, resetUI },
     store: { createPersistedStore, downloadBlob },
   };
 });

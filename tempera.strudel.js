@@ -159,6 +159,18 @@ function snapTo(sliders) {
   log.tick();
 }
 
+// Math.random not the seeded rng: the seeded rng drives deterministic
+// content generation at load; an interactive randomise should produce
+// different results each click.
+function randomise() {
+  currentSliders.rootBreak = Math.floor(Math.random() * names.length);
+  currentSliders.altBreak  = Math.floor(Math.random() * N_BREAKS);
+  currentSliders.pattern   = Math.floor(Math.random() * N_PATTERNS);
+  currentSliders.prob      = Math.floor(Math.random() * N_PROBS);
+  sliderPanel.setAll(currentSliders);
+  log.tick();
+}
+
 function breakHex(breakStr) {
   const slugs = SB.mini.parseBreak(breakStr);
   if (slugs.length === 0) return breakStr;
@@ -172,19 +184,41 @@ function patternHex(patternStr) {
 }
 // =============================
 
-// ===== SLIDER PANEL =====
-// Custom sliders own currentSliders; pattern-graph signals read from
-// it via ref(() => …), which is exactly how Strudel's own slider() is
-// implemented under the hood. Anchored at bottom-right; the log panel
-// stacks above it.
+// ===== TOP-RIGHT STACK =====
+// Panels stack top-down in this order:
+//   1. addBar:          add + randomise
+//   2. sliderPanel:     four sliders (custom DOM sliders own
+//                       currentSliders; pattern-graph signals read from
+//                       it via ref(() => …), which is exactly how
+//                       Strudel's own slider() is implemented under
+//                       the hood)
+//   3. logPanel:        patch / break / pattern readouts
+//   4. capturesToolbar: new row + export
+//   5. capturesList:    captured rows, newest on top
+//
+// addCell / newRow / randomise are function declarations so the button
+// handlers wired into addBar resolve them at click time, after every
+// panel below has been created.
+
 const currentSliders = {
   rootBreak: names.length - 1,
   altBreak:  N_BREAKS - 1,
   pattern:   N_PATTERNS - 1,
   prob:      N_PROBS - 1,
 };
+
+const addBar = SB.ui.createButtonBar({
+  corner: 'top-right', id: 'add-bar',
+  style: 'top:50px',
+  buttons: [
+    SB.ui.createButton('add', addCell),
+    SB.ui.createButton('randomise', randomise),
+  ],
+});
+
 const sliderPanel = SB.ui.createSliderPanel({
-  corner: 'bottom-right', id: 'slider-panel',
+  corner: 'top-right', id: 'slider-panel',
+  stack: 'add-bar',
   style: 'min-width:340px;max-width:520px',
   format: SB.hex.hex2,
   rows: [
@@ -198,11 +232,9 @@ const sliderPanel = SB.ui.createSliderPanel({
       onChange: v => { currentSliders.prob      = v; log.tick(); } },
   ],
 });
-// ========================
 
-// ===== LOG PANEL =====
 const logPanel = SB.ui.createCornerPanel({
-  corner: 'bottom-right', id: 'log-display',
+  corner: 'top-right', id: 'log-display',
   stack: 'slider-panel',
   style: 'padding:12px 14px;max-width:520px;white-space:pre-wrap;cursor:text',
 });
@@ -227,9 +259,7 @@ const log = {
   get pattern() { return currentPattern; },
 };
 renderLog();
-// =====================
 
-// ===== CAPTURES PANEL =====
 const SCHEMA_VERSION = 7;
 const captureContext = {
   gistUser, gistId,
@@ -247,15 +277,23 @@ let capturesPayload = capturesStore.get() || { ...captureDefault };
 capturesPayload.context = captureContext;
 capturesStore.set(capturesPayload);
 
-const capturesPanel = SB.ui.createCornerPanel({
-  corner: 'top-right', id: 'captures-display',
-  style: 'top:50px;padding:8px 10px;max-height:45vh;max-width:600px;display:flex;flex-direction:column',
+const capturesToolbar = SB.ui.createButtonBar({
+  corner: 'top-right', id: 'captures-toolbar',
+  stack: 'log-display',
+  buttons: [
+    SB.ui.createButton('new row', newRow),
+    SB.ui.createButton('export', () => capturesStore.exportAsFile('tempera-captures-' + gistId)),
+  ],
 });
 
-const btnBar = document.createElement('div');
-btnBar.style.cssText = 'display:flex;gap:4px;margin-bottom:6px;align-items:center';
+const capturesList = SB.ui.createCornerPanel({
+  corner: 'top-right', id: 'captures-list',
+  stack: 'captures-toolbar',
+  style: 'padding:8px 10px;max-width:600px',
+});
 const listEl = document.createElement('div');
-listEl.style.cssText = 'overflow-y:auto;overflow-x:auto;white-space:pre;min-height:1.4em';
+listEl.style.cssText = 'overflow-y:auto;overflow-x:auto;white-space:pre;min-height:1.4em;max-height:45vh';
+capturesList.element.appendChild(listEl);
 
 function deleteRow(i) {
   if (!window.confirm('Delete row ' + i + '?')) return;
@@ -283,12 +321,10 @@ function renderCaptures() {
   listEl.textContent = '';
   const banks = capturesPayload.banks;
   if (banks.length === 0) {
-    listEl.style.display = 'none';
-    btnBar.style.marginBottom = '0';
+    capturesList.element.style.display = 'none';
     return;
   }
-  listEl.style.display = '';
-  btnBar.style.marginBottom = '6px';
+  capturesList.element.style.display = '';
   const iw = String(banks.length - 1).length;
   const moveOpts = { hoverBg: '#0a0', hoverColor: '#000' };
   for (let i = banks.length - 1; i >= 0; i--) {
@@ -347,17 +383,8 @@ function newRow() {
   renderCaptures();
 }
 
-btnBar.appendChild(SB.ui.createButton('new row', newRow));
-btnBar.appendChild(SB.ui.createButton('add cell', addCell));
-const spacer = document.createElement('span');
-spacer.style.cssText = 'flex:1';
-btnBar.appendChild(spacer);
-btnBar.appendChild(SB.ui.createButton('export', () => capturesStore.exportAsFile('tempera-captures-' + gistId)));
-
-capturesPanel.element.appendChild(btnBar);
-capturesPanel.element.appendChild(listEl);
 renderCaptures();
-// ==========================
+// ===========================
 
 // ===== PATTERN-GRAPH SIGNALS =====
 const delaySlider = slider(0.5, 0, 1, 0.01);

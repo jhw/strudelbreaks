@@ -49,7 +49,7 @@ window.StrudelBreaks = {
   mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
   util:  { meanIndex, thinByUniforms },
   hex:   { hex2, hexPad, arrayHex },
-  ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createSliderRow, createSliderPanel, resetUI },
+  ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createSliderRow, createSliderPanel, resetUI },
   store: { createPersistedStore, downloadBlob },
 };
 ```
@@ -129,6 +129,13 @@ at the edge (for Strudel's `mini()` / `fmap(mini).innerJoin()` dance).
 - `createDeleteIcon(onClick, { style? })` → red-hover `x` preset over
   `createIconButton` for destructive actions. No confirmation is
   wired — callers handle that at the domain layer.
+- `createButtonBar({ corner, id, style?, stack?, buttons })` →
+  `{ element }`. Thin convenience over `createCornerPanel` with a
+  flex row and tighter bar-style padding. `buttons` is an array of
+  pre-built elements (typically from `createButton` /
+  `createIconButton`) appended in order. Lets a template split its
+  toolbar into multiple independently-stacked bars rather than
+  cramming every control into a single panel.
 - `createSliderRow({ label, min, max, initial?, step?, onChange, format?, width? })` →
   `{ element, setValue, getValue }`. Flex row: label + readout +
   native `<input type=range>`. `format(v)` renders the readout
