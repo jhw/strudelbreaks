@@ -34,7 +34,7 @@ const BREAK_ALT_SLOTS_MAX = 2;
 
 const SEED = 22682;
 
-const SB_URL = 'https://cdn.jsdelivr.net/gh/jhw/strudelbreaks@main/breaks.js?_=' + Date.now();
+const SB_URL = 'https://cdn.jsdelivr.net/gh/jhw/strudelbreaks@c9b0d40/breaks.js?_=' + Date.now();
 // ==================
 
 // ===== STRUDEL + LIBRARY SETUP =====
