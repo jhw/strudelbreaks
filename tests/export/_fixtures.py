@@ -33,20 +33,30 @@ def load_render_module(target: str):
     """Load `scripts/export/<target>/render.py` as a fresh module each
     call so tests don't share monkey-patch state.
 
-    Targets containing a hyphen (`ot-doom`) can't be imported as
-    packages, so we go through importlib.util directly. We also
-    prepend `scripts/export` to sys.path so the renderer's own
-    `from common.cli import ...` and `from audio import ...` lines
-    resolve.
+    Targets containing a hyphen (`ot-doom`, `torso-s4`) can't be
+    imported as packages, so we go through importlib.util directly.
+    We prepend `scripts/export` to sys.path so the renderer's own
+    `from common.cli import ...` resolves, and we put the target's
+    own dir at the *front* of sys.path before each load so its sibling
+    `audio` module wins over any cached one from a previous target —
+    several targets ship their own audio.py, and Python's import cache
+    would otherwise hand back whichever one loaded first.
     """
     target_dir = EXPORT_ROOT / target
     render_path = target_dir / 'render.py'
-    for path in (str(EXPORT_ROOT), str(target_dir)):
-        if path not in sys.path:
-            sys.path.insert(0, path)
+    if str(EXPORT_ROOT) not in sys.path:
+        sys.path.insert(0, str(EXPORT_ROOT))
+    target_path = str(target_dir)
+    while target_path in sys.path:
+        sys.path.remove(target_path)
+    sys.path.insert(0, target_path)
+    # Evict any cached sibling modules — each target ships its own
+    # audio.py, and we don't want the previous target's version to
+    # bleed into this load.
+    for cached in ('audio',):
+        sys.modules.pop(cached, None)
     mod_name = f'_test_render_{target.replace("-", "_")}'
-    if mod_name in sys.modules:
-        del sys.modules[mod_name]
+    sys.modules.pop(mod_name, None)
     spec = importlib.util.spec_from_file_location(mod_name, render_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
