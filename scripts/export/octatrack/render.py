@@ -35,6 +35,7 @@ from octapy import (
     FX2Type,
     ScaleMode,
     SliceMode,
+    TrigCondition,
 )
 
 from common.cli import build_parser, require_file, resolve_name
@@ -47,6 +48,26 @@ from common.schema import load_export
 # slices and the OT pattern (1/8-note step grid) couldn't address them.
 N_SLICES = 16
 OT_PATTERN_STEPS = 16  # 1 bar at 1/16 per step — one Strudel cycle
+
+# Octatrack trig probability buckets (TrigCondition.PERCENT_*). The OT
+# can only express the discrete values listed below; arbitrary
+# probabilities snap to the nearest bucket. p == 1.0 leaves the
+# condition unset, which is the OT default ("always fires"). The
+# alternative — setting PERCENT_99 for p == 1.0 — would introduce a
+# 1% miss rate, which is not what the user asked for.
+PROBABILITY_BUCKETS = [
+    (1, TrigCondition.PERCENT_1),  (2, TrigCondition.PERCENT_2),
+    (4, TrigCondition.PERCENT_4),  (6, TrigCondition.PERCENT_6),
+    (9, TrigCondition.PERCENT_9),  (13, TrigCondition.PERCENT_13),
+    (19, TrigCondition.PERCENT_19), (25, TrigCondition.PERCENT_25),
+    (33, TrigCondition.PERCENT_33), (41, TrigCondition.PERCENT_41),
+    (50, TrigCondition.PERCENT_50), (59, TrigCondition.PERCENT_59),
+    (67, TrigCondition.PERCENT_67), (75, TrigCondition.PERCENT_75),
+    (81, TrigCondition.PERCENT_81), (87, TrigCondition.PERCENT_87),
+    (91, TrigCondition.PERCENT_91), (94, TrigCondition.PERCENT_94),
+    (96, TrigCondition.PERCENT_96), (98, TrigCondition.PERCENT_98),
+    (99, TrigCondition.PERCENT_99),
+]
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent
@@ -85,6 +106,21 @@ def cache_sample(name, url, cache_dir):
 def wav_info(path):
     with wave.open(str(path), 'rb') as w:
         return w.getnframes(), w.getframerate()
+
+
+def probability_to_condition(p):
+    """Map a 0..1 probability to a TrigCondition, or None for "always fires".
+
+    p == 1.0 → None (no condition; OT default fires every loop).
+    p ∈ [0, 1) → nearest available PERCENT_* bucket.
+    Out of range → ValueError.
+    """
+    if not 0.0 <= p <= 1.0:
+        raise ValueError(f'probability must be in [0, 1], got {p}')
+    if p == 1.0:
+        return None
+    pct = p * 100
+    return min(PROBABILITY_BUCKETS, key=lambda b: abs(b[0] - pct))[1]
 
 
 def expand_cell(break_names, pattern_idxs, events_per_cycle):
@@ -126,7 +162,8 @@ def collect_break_names(banks):
     return names
 
 
-def build_project(export_path, name):
+def build_project(export_path, name, probability=1.0):
+    trig_condition = probability_to_condition(probability)
     payload, ctx = load_export(export_path, REQUIRED_CTX)
     if ctx['nSlices'] != N_SLICES:
         sys.exit(f'nSlices {ctx["nSlices"]} != {N_SLICES} (octatrack render assumes 16 slices)')
@@ -195,12 +232,14 @@ def build_project(export_path, name):
                 step = track.step(2 * i + 1)
                 step.sample_lock = flex_slots[name]
                 step.slice_index = slice_idx
+                if trig_condition is not None:
+                    step.condition = trig_condition
 
     return project
 
 
-def render(export_path, name):
-    project = build_project(export_path, name)
+def render(export_path, name, probability=1.0):
+    project = build_project(export_path, name, probability=probability)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     zip_path = OUTPUT_DIR / f'{name}.zip'
     project.to_zip(zip_path)
@@ -208,9 +247,13 @@ def render(export_path, name):
 
 
 def main():
-    args = build_parser(__doc__.splitlines()[0]).parse_args()
+    parser = build_parser(__doc__.splitlines()[0])
+    parser.add_argument('--probability', type=float, default=1.0,
+                        help='per-trig probability in [0, 1] (default 1.0 = always fires); '
+                             'snaps to the nearest OT trig-condition bucket')
+    args = parser.parse_args()
     require_file(args.export)
-    out = render(args.export, resolve_name(args))
+    out = render(args.export, resolve_name(args), probability=args.probability)
     print(out)
 
 
