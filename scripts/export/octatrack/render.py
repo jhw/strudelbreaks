@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Render a tempera captures JSON export into an Octatrack project zip.
 
-Each row → one bank. Each cell → one pattern in that bank. Each pattern has
-up to 16 triggers on a 32-step (2-bar) grid: the Strudel break × pattern
-combination is expanded to 16 events (eventsPerCycle × loopCycles), and each
-event becomes one OT trig at step 2i+1 with a FLEX sample_lock (break name)
-and slice_index p-lock (pattern slice).
+Each row → one bank. Each cell → one pattern in that bank. Each pattern is a
+1-bar / 16-step grid matching one Strudel cycle: the cell's pattern of
+eventsPerCycle slice indices becomes eventsPerCycle trigs at every other
+step (steps 1, 3, ..., 2N-1) with a FLEX sample_lock (break name) and
+slice_index p-lock (pattern slice). OT pattern looping plays subsequent
+cycles — equivalent to Strudel's per-cycle pattern repeat.
 
 Samples referenced by the captures are fetched from the source gist
 (`context.gistUser` / `context.gistId` → strudel.json) and cached under
@@ -40,14 +41,14 @@ from common.cli import build_parser, require_file, resolve_name
 from common.schema import load_export
 
 N_SLICES = 16
-OT_PATTERN_STEPS = 32  # 2 bars at 1/16 per step
+OT_PATTERN_STEPS = 16  # 1 bar at 1/16 per step — one Strudel cycle
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 OUTPUT_DIR = REPO_ROOT / 'tmp' / 'octatrack'
 SAMPLES_DIR = REPO_ROOT / 'tmp' / 'samples'
 
-REQUIRED_CTX = ('gistUser', 'gistId', 'bpm', 'eventsPerCycle', 'loopCycles', 'nSlices')
+REQUIRED_CTX = ('gistUser', 'gistId', 'bpm', 'eventsPerCycle', 'nSlices')
 
 
 def fetch_sample_manifest(gist_user, gist_id):
@@ -81,19 +82,18 @@ def wav_info(path):
         return w.getnframes(), w.getframerate()
 
 
-def expand_cell(break_names, pattern_idxs, events_per_cycle, loop_cycles):
-    """Expand a captured (break, pattern) cell to 16 (name, slice_idx|None) events.
+def expand_cell(break_names, pattern_idxs, events_per_cycle):
+    """Expand a captured (break, pattern) cell to events_per_cycle (name, slice_idx|None) events.
 
     Break `{a b c d}%N` has len(break_names) items cycling to fill N events
-    per cycle. Pattern has events_per_cycle entries. Both repeat each cycle;
-    total = events_per_cycle * loop_cycles.
+    per cycle. Pattern has events_per_cycle entries. Output is one Strudel
+    cycle's worth of events; OT pattern looping handles subsequent cycles.
     """
     events = []
-    for cycle in range(loop_cycles):
-        for pos in range(events_per_cycle):
-            name = break_names[pos % len(break_names)]
-            slice_idx = pattern_idxs[pos] if pos < len(pattern_idxs) else None
-            events.append((name, slice_idx))
+    for pos in range(events_per_cycle):
+        name = break_names[pos % len(break_names)]
+        slice_idx = pattern_idxs[pos] if pos < len(pattern_idxs) else None
+        events.append((name, slice_idx))
     return events
 
 
@@ -164,9 +164,11 @@ def build_project(export_path, name):
         t1.configure_flex(default_slot)
         t1.setup.slice = SliceMode.ON
         t1.fx2_type = FX2Type.DELAY
+        t1.fx2.send = 64
 
         t8 = part.audio_track(8)
         t8.fx1_type = FX1Type.CHORUS
+        t8.fx1.mix = 64
 
         for cell_idx, cell in enumerate(bank_cells):
             pattern = bank.pattern(cell_idx + 1)
@@ -175,7 +177,7 @@ def build_project(export_path, name):
 
             events = expand_cell(
                 cell['break'], cell['pattern'],
-                ctx['eventsPerCycle'], ctx['loopCycles'],
+                ctx['eventsPerCycle'],
             )
             track = pattern.audio_track(1)
             active = [2 * i + 1 for i, (_, s) in enumerate(events) if s is not None]
