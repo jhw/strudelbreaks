@@ -4,7 +4,9 @@
   "description": "Reusable plumbing for Strudel breakbeat templates: seeded RNG, a Pico-style sequence class, mini-notation helpers, corner-panel UI chrome, and a schema-gated persisted store. Distributed over jsDelivr; not published to npm.",
   "main": "breaks.js",
   "scripts": {
-    "test": "node --test 'tests/*.test.js'"
+    "test": "node --test 'tests/*.test.js'",
+    "test:py": "python -W ignore::ResourceWarning -m unittest discover -s tests/export -t .",
+    "test:all": "npm test && npm run test:py"
   },
   "repository": {
     "type": "git",

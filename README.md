@@ -186,19 +186,35 @@ no version pinning.
 
 ## Tests
 
-`node:test` — zero deps, runs under Node 18+.
+JS library — `node:test`, zero deps, runs under Node 18+:
 
 ```
 npm test
 ```
 
-CI at `.github/workflows/test.yml` runs the same on every push / PR to
-`main`.
+Python export targets — stdlib `unittest`, requires the `requirements.txt`
+deps installed in a venv (`octapy`, `pydub`):
 
-Coverage: every pure helper (`rng`, `pico`, `mini`, `util`, `hex`, and
-the `store` primitive behind a localStorage stub). `ui` primitives are
-deliberately not unit-tested — thin wrappers over `document.createElement`
-whose only real failure mode is a blank-page smoke test.
+```
+npm run test:py
+```
+
+Or both at once: `npm run test:all`.
+
+CI at `.github/workflows/test.yml` runs the JS suite on every push / PR
+to `main`.
+
+Coverage:
+- JS: every pure helper (`rng`, `pico`, `mini`, `util`, `hex`, and
+  the `store` primitive behind a localStorage stub). `ui` primitives
+  are deliberately not unit-tested — thin wrappers over
+  `document.createElement` whose only real failure mode is a
+  blank-page smoke test.
+- Python: pure helpers per render target plus a round-trip smoke
+  test that synthesises an export, runs the renderer end-to-end
+  with stubbed manifest/sample fetches, and asserts on the output
+  artefact. The renderers' I/O surfaces (gist fetch, audio rendering)
+  are stubbed out at the function level rather than mocked deeper.
 
 ## Demo
 
