@@ -40,6 +40,11 @@ from octapy import (
 from common.cli import build_parser, require_file, resolve_name
 from common.schema import load_export
 
+# Source break wavs are 32 steps (2 bars at 1/16). N_SLICES=16 cuts them
+# into 16 slices of 2 steps each, so a slice spans an 1/8 note plus the
+# 1/16 immediately after — the off-grid ghost beat that gives breakbeats
+# their swing. A finer slicing would split those ghosts off into their own
+# slices and the OT pattern (1/8-note step grid) couldn't address them.
 N_SLICES = 16
 OT_PATTERN_STEPS = 16  # 1 bar at 1/16 per step — one Strudel cycle
 
@@ -85,13 +90,15 @@ def wav_info(path):
 def expand_cell(break_names, pattern_idxs, events_per_cycle):
     """Expand a captured (break, pattern) cell to events_per_cycle (name, slice_idx|None) events.
 
-    Break `{a b c d}%N` has len(break_names) items cycling to fill N events
-    per cycle. Pattern has events_per_cycle entries. Output is one Strudel
-    cycle's worth of events; OT pattern looping handles subsequent cycles.
+    Break names come from Strudel's polymetric-stretch curly form
+    `{a b c d}%N` — see STRUDEL.md ("Polymetric stretch") for the mapping.
+    Pattern slice indices are positional `[i j k ...]`, one per event.
+    Output is one Strudel cycle; OT pattern looping handles repeats.
     """
     events = []
+    n_names = len(break_names)
     for pos in range(events_per_cycle):
-        name = break_names[pos % len(break_names)]
+        name = break_names[pos * n_names // events_per_cycle]
         slice_idx = pattern_idxs[pos] if pos < len(pattern_idxs) else None
         events.append((name, slice_idx))
     return events

@@ -56,6 +56,40 @@ transpiler would have used for a source literal, giving us a
 `Pattern<Pattern<event>>`. `.innerJoin()` flattens that back to
 `Pattern<event>`, which is what sources and effects expect downstream.
 
+## Polymetric stretch: `{a b c d}%N`
+
+The curly form is **not** a sequence — it's a polymetric construct. `%N`
+asks Strudel to spread the M items inside the braces *uniformly* over N
+events per cycle. Each item gets `floor(N/M)` or `ceil(N/M)` consecutive
+events — never interleaved.
+
+For M=4, N=8 (`{a b c d}%8`):
+
+```
+i:        0 1 2 3 4 5 6 7
+name_idx: 0 0 1 1 2 2 3 3        →  a a b b c c d d
+```
+
+For M=3, N=8 (`{a b c}%8`): `a a a b b b c c` — items take floor or
+ceil(N/M) events, distributed left-to-right.
+
+Mapping from event position `i` (0..N-1) back to item index:
+
+```
+item_idx = i * M // N            (floor division)
+```
+
+This is **not** the same as `i % M`, which cycles the items
+(`a b c d a b c d ...`). That's what plain `a b c d` over N steps, or the
+`<a b c d>` cycle-alternation construct, would do. Tempera always emits
+the curly form, so any consumer that walks the captured names back to
+per-event values must polymetric-stretch.
+
+Square-bracket `[i j k ...]` is positional — one entry per event, no
+stretching needed. Tempera uses curly braces only for the break (because
+sample names tile the bar) and square brackets for the slice pattern
+(because each step gets its own slice index).
+
 ## References
 
 - [Mini Notation — Strudel](https://strudel.cc/learn/mini-notation/)
