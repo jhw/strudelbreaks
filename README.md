@@ -174,14 +174,15 @@ consuming template.
 - `downloadBlob(filename, content, mimeType?)` — browser-only helper
   used by `exportAsFile`.
 
-## CDN URLs
+## CDN URL
 
-- **Perf pin** (cached, stable):
-  `https://cdn.jsdelivr.net/gh/jhw/strudelbreaks@v0.1.0/breaks.js`
-- **Helper dev** (cache-bust per eval):
-  `https://cdn.jsdelivr.net/gh/jhw/strudelbreaks@main/breaks.js?_=${Date.now()}`
-- **Exact SHA** (for "I just pushed, test it now"):
-  `https://cdn.jsdelivr.net/gh/jhw/strudelbreaks@<sha>/breaks.js`
+```
+https://cdn.jsdelivr.net/gh/jhw/strudelbreaks@main/breaks.js?_=${Date.now()}
+```
+
+The `@main` ref + `?_=${Date.now()}` query param keeps the consumer on
+the latest commit and busts jsDelivr's cache on every eval. Dev mode —
+no version pinning.
 
 ## Tests
 

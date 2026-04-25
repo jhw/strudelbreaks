@@ -6,7 +6,7 @@
 
 // ===== CONFIG =====
 const gistUser = 'jhw';
-const gistId = '94c124a4e74471e533868f8abb71ae08';
+const gistId = 'cde852d3c3a0054b80c13de00e057e88';
 const gistUrl = 'https://gist.githubusercontent.com/' + gistUser + '/' + gistId + '/raw/strudel.json';
 
 const BPM = 128;
@@ -34,7 +34,7 @@ const BREAK_ALT_SLOTS_MAX = 2;
 
 const SEED = 22682;
 
-const SB_URL = 'https://cdn.jsdelivr.net/gh/jhw/strudelbreaks@c9b0d40/breaks.js?_=' + Date.now();
+const SB_URL = 'https://cdn.jsdelivr.net/gh/jhw/strudelbreaks@main/breaks.js?_=' + Date.now();
 // ==================
 
 // ===== STRUDEL + LIBRARY SETUP =====
@@ -163,7 +163,7 @@ function randomise() {
   currentSliders.rootBreak = Math.floor(Math.random() * names.length);
   currentSliders.altBreak  = Math.floor(Math.random() * N_BREAKS);
   currentSliders.pattern   = Math.floor(Math.random() * N_PATTERNS);
-  currentSliders.prob      = Math.floor(Math.random() * N_PROBS);
+  currentSliders.prob      = N_PROBS - 1;
   sliderPanel.setAll(currentSliders);
   log.tick();
 }
@@ -183,7 +183,7 @@ function patternHex(patternStr) {
 
 // ===== TOP-RIGHT STACK =====
 // Panels stack top-down in this order:
-//   1. addBar:          add + randomise
+//   1. addBar:          randomise + save
 //   2. sliderPanel:     four sliders (custom DOM sliders own
 //                       currentSliders; pattern-graph signals read from
 //                       it via ref(() => …), which is exactly how
@@ -208,8 +208,8 @@ const addBar = SB.ui.createButtonBar({
   corner: 'top-right', id: 'add-bar',
   style: 'top:50px',
   buttons: [
-    SB.ui.createButton('add', addCell),
-    SB.ui.createButton('randomise', randomise),
+    SB.ui.createButton('randomise', randomise, { style: 'min-width:90px' }),
+    SB.ui.createButton('save', addCell, { style: 'min-width:90px' }),
   ],
 });
 
@@ -325,7 +325,7 @@ function renderCaptures() {
       row.appendChild(patchSpan(c.sliders));
       row.appendChild(SB.ui.createDeleteIcon(() => deleteCell(i, j)));
     });
-    row.appendChild(document.createTextNode(' │ ' + bank.length));
+    row.appendChild(document.createTextNode(' │ ' + bank.length + ' │ '));
     row.appendChild(SB.ui.createDeleteIcon(() => deleteRow(i)));
 
     listEl.appendChild(row);
@@ -334,16 +334,6 @@ function renderCaptures() {
 
 function addCell() {
   const s = currentSliders;
-  const currentBank = capturesPayload.banks[capturesPayload.banks.length - 1] || [];
-  for (const existing of currentBank) {
-    const es = existing.sliders;
-    if (existing.seed === SEED
-        && es.rootBreak === s.rootBreak && es.altBreak === s.altBreak
-        && es.pattern === s.pattern && es.prob === s.prob) {
-      console.warn('[tempera] skipping add: identical patch already in current row');
-      return;
-    }
-  }
   const cell = {
     t: Date.now(), seed: SEED,
     sliders: { ...s },
