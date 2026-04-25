@@ -44,7 +44,13 @@ def exists_on_ot(project_name):
     if not OT_SET.exists():
         return False
     pl = project_name.lower()
-    return any(d.is_dir() and d.name.lower() == pl for d in OT_SET.iterdir())
+    for d in OT_SET.iterdir():
+        try:
+            if d.is_dir() and d.name.lower() == pl:
+                return True
+        except OSError as e:
+            print(f'  warning: cannot stat {d.name}: {e}', file=sys.stderr)
+    return False
 
 
 def extract_project(zip_path):
