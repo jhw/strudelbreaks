@@ -1,33 +1,28 @@
-"""Audio rendering for ot-doom: source break wavs → 16 timesliced wavs.
+"""Audio rendering for ot-doom: source break wavs → per-cell bar audio,
+then matrix chains across the cells of a row.
 
-The shipped renderer is a *one-pass* mapping: for each pattern step `i`
-and each break-position `j ∈ 0..15`, the timesliced wav at step `i`
-holds, in order, `source_slice(B'[j], pattern_idxs[i])`. There is no
-intermediate "output break" file — see docs/planning/ot-doom.md
-("One pass, not two") for the algebra.
+See docs/planning/ot-doom.md for the design — short version: every cell
+in a row renders to one bar of audio, then chain[k] is the k-th equal
+segment of every cell concatenated. The crossfader walks slice_index
+0..N-1 across all chains, which by construction picks "input k played
+in full".
 
-Asymmetric fade envelope on every concatenated sub-slice:
-- fade-out 3 ms cosine ramp (tail is mid-decay; long enough to bury
-  the discontinuity into the next slice's transient, short enough to
-  be inaudible on the dying tail).
-- fade-in 1 ms cosine ramp (head is where the attack lives; pydub's
-  minimum-resolution fade, ~44 samples at 44.1 kHz, is a pure click
-  guard rather than an attack-shaper).
+No fades anywhere — Strudel doesn't apply per-event or per-segment
+fades and the OT side should match it. If pathological patterns cause
+audible pops at slice boundaries, reintroduce a sub-perceptual envelope
+(0.3 ms / 0.5 ms) at `render_cell_audio` only — never at the
+matrix-chain stage, where boundaries already lie inside whatever
+envelope `render_cell_audio` produced.
 
-Rests (`pattern_idxs[i] is None`) become silence segments of one
-slice's length. Fades on silence are no-ops, so there's no special
-case.
+Rests (`pattern[i] is None`) become silence segments of one source-slice's
+length.
 """
 from __future__ import annotations
 
 import pathlib
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from pydub import AudioSegment
-
-
-FADE_IN_MS = 1
-FADE_OUT_MS = 3
 
 
 def load_break(path: pathlib.Path) -> AudioSegment:
@@ -53,43 +48,60 @@ def equal_slices(seg: AudioSegment, n_slices: int) -> List[AudioSegment]:
     return out
 
 
-def render_timesliced_step(
+def render_cell_audio(
+    cell: dict,
     source_slices: Dict[str, List[AudioSegment]],
-    b_prime: List[str],
-    pattern_idx: Optional[int],
-    slice_ms: int,
+    events_per_cycle: int,
 ) -> AudioSegment:
-    """Build one timesliced wav: concat over j of B'[j]'s source slice.
+    """Render one captured cell to one bar of audio.
 
-    Args:
-        source_slices: name -> 16 equal slices of that break's wav.
-        b_prime: length-16 list of break names (the padded source set).
-        pattern_idx: the captured Strudel slice index for this step,
-            or None for a rest.
-        slice_ms: target slice length in ms; sub-slices that come back
-            slightly off (rounding from equal_slices) are pad/trimmed
-            to this so all 16 sub-slices land at exact OT sub-slice
-            boundaries.
+    `cell.break` is the captured curly-form name list (length M). It's
+    polymetric-stretched onto `events_per_cycle` events: position i →
+    name index `i * M // events_per_cycle`. `cell.pattern` is the
+    captured slice index per event (or None for a rest).
 
-    Returns:
-        AudioSegment of length `16 * slice_ms` ms.
+    For each event: append the corresponding source slice (or a slice's
+    worth of silence on rest), with the asymmetric fade envelope.
     """
-    if pattern_idx is None:
-        sub = AudioSegment.silent(duration=slice_ms,
-                                  frame_rate=_anchor_frame_rate(source_slices))
-        # silent already has zero attack/tail; fades are no-ops, but we
-        # apply them anyway so every sub-slice goes through the same
-        # envelope path.
-        sub = sub.fade_in(FADE_IN_MS).fade_out(FADE_OUT_MS)
-        return sub * 16
+    break_names = cell['break']
+    m = len(break_names)
+    pattern = cell['pattern']
+
+    # Anchor slice length and frame rate from the first source we hit;
+    # the source-prep pipeline guarantees they're consistent.
+    anchor_name = break_names[0]
+    anchor_slice = source_slices[anchor_name][0]
+    slice_ms = len(anchor_slice)
+    frame_rate = anchor_slice.frame_rate
 
     out = AudioSegment.empty()
-    for j in range(16):
-        name = b_prime[j]
-        sub = source_slices[name][pattern_idx]
-        sub = _fit_to_ms(sub, slice_ms)
-        sub = sub.fade_in(FADE_IN_MS).fade_out(FADE_OUT_MS)
-        out += sub
+    for i in range(events_per_cycle):
+        slice_idx = pattern[i] if i < len(pattern) else None
+        if slice_idx is None:
+            piece = AudioSegment.silent(duration=slice_ms, frame_rate=frame_rate)
+        else:
+            name = break_names[i * m // events_per_cycle]
+            piece = source_slices[name][slice_idx]
+            piece = _fit_to_ms(piece, slice_ms)
+        out += piece
+    return out
+
+
+def build_matrix_chain(input_audios: List[AudioSegment], k: int, n: int) -> AudioSegment:
+    """Build chain[k] = segment_k of every input concatenated.
+
+    Each input is sliced into `n` equal segments; chain[k] picks the
+    k-th segment from every input. No fades — segment boundaries lie
+    inside whatever envelope `render_cell_audio` produced and any
+    extra here would just double-attenuate.
+    """
+    bar_ms = len(input_audios[0])
+    seg_ms = bar_ms / n
+    start_ms = int(round(k * seg_ms))
+    end_ms = int(round((k + 1) * seg_ms))
+    out = AudioSegment.empty()
+    for inp in input_audios:
+        out += inp[start_ms:end_ms]
     return out
 
 
@@ -102,16 +114,6 @@ def _fit_to_ms(seg: AudioSegment, target_ms: int) -> AudioSegment:
         return seg + AudioSegment.silent(duration=diff,
                                          frame_rate=seg.frame_rate)
     return seg[:target_ms]
-
-
-def _anchor_frame_rate(source_slices: Dict[str, List[AudioSegment]]) -> int:
-    """Pick a frame_rate from the loaded sources so silence segments
-    match. All sources share a rate in our pipeline — we just grab
-    the first."""
-    for slices in source_slices.values():
-        if slices:
-            return slices[0].frame_rate
-    return 44100
 
 
 def export_wav(seg: AudioSegment, path: pathlib.Path) -> None:

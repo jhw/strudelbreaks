@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """Render a tempera captures JSON export into an Octatrack megabreak-of-doom
-project zip.
+project zip — cell-input variant.
 
-Each non-empty bank from the captures becomes one OT bank with one Part
-and one 16-step Pattern on track 1. Per cell, the cell's break vocabulary
-B (with |B| ∈ {4, 8, 16} required) is padded by repetition to length 16
-(B'), and 16 timesliced wavs are rendered such that:
+Each non-empty row of the captures becomes one OT bank with one part and
+one 16-step pattern on track 1. The cells of the row are the doom
+*inputs* (must be 4, 8, or 16): each cell renders to a bar of audio,
+then N matrix chains are built where chain[k] is the k-th equal segment
+of every input concatenated. N flex slots receive the chains with N
+slice markers each. The pattern fires N trigs at intervals of 16/N,
+each sample-locked to its chain. Scenes lock track 1's slice_index to
+0 and N-1 — the crossfader interpolates between, walking the input
+axis: at any fader position s, every trig plays segment k of input s,
+so input s plays in full grid-aligned.
 
-    timesliced[i] = concat_over_j( source_slice(B'[j], pattern_idxs[i]) )
-
-Each timesliced wav is added as a Flex slot, sliced into 16 equal slices
-on-device. Track 1 is set to slice mode ON; scenes 1 and 2 lock STRT
-(playback_param2) to 0 and 127 respectively, so the crossfader sweeps
-sub-slices 0..15 of every step's wav — i.e. it sweeps across breaks.
-
-See docs/planning/ot-doom.md for the design rationale and constraints.
+This differs from the forum-canonical megabreak (which crossfades
+between source breaks rather than between captured patterns). See
+docs/planning/ot-doom.md for the full design + comparison.
 
 Usage:
     python scripts/export/ot-doom/render.py <path/to/export.json> [--name NAME] [--seed N]
@@ -40,17 +41,21 @@ from common.cli import build_parser, require_file, resolve_name
 from common.schema import load_export
 
 from audio import (
+    build_matrix_chain,
     equal_slices,
     export_wav,
     load_break,
-    render_timesliced_step,
+    render_cell_audio,
 )
 
 
-N_SLICES = 16        # source-break grid (matches the existing octatrack target)
-N_SUB_SLICES = 16    # sub-slices per timesliced wav (one per break-position j)
-N_PATTERN_STEPS = 16
-ALLOWED_B = {4, 8, 16}
+# Source break wavs are 32 steps (2 bars at 1/16). N_SLICES=16 cuts them
+# into 16 slices of 2 steps each — same scheme as the existing octatrack
+# target. See scripts/export/octatrack/render.py for the ghost-beat
+# rationale.
+N_SLICES = 16
+N_PATTERN_STEPS = 16          # 1 bar at 1/16 — one Strudel cycle.
+ALLOWED_INPUT_COUNTS = (4, 8, 16)
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent
@@ -86,142 +91,96 @@ def cache_sample(name, url, cache_dir):
     return path
 
 
-def expand_break_names(break_names, events_per_cycle):
-    """Apply STRUDEL.md's polymetric stretch i*M//N to expand the
-    captured `{a b c d}%N` form to per-event names."""
-    n = len(break_names)
-    return [break_names[i * n // events_per_cycle] for i in range(events_per_cycle)]
-
-
-def unique_preserve_order(xs):
-    seen = set()
-    out = []
-    for x in xs:
-        if x not in seen:
-            seen.add(x)
-            out.append(x)
-    return out
-
-
-def pad_b_to_16(b):
-    return [b[i % len(b)] for i in range(16)]
-
-
 def set_equal_slices(project, slot, n_slices, segment_ms, sample_rate):
-    """16 equal slice markers across `segment_ms` of audio at `slot`."""
+    """N equal slice markers across `n_slices * segment_ms` of audio."""
     slot_markers = project.markers.get_slot(slot, is_static=False)
-    frame_count = int(segment_ms * sample_rate / 1000)
+    total_ms = n_slices * segment_ms
+    frame_count = int(round(total_ms * sample_rate / 1000))
     slot_markers.sample_length = frame_count
-    slice_ms = segment_ms / n_slices
-    slices = [(int(i * slice_ms), int((i + 1) * slice_ms)) for i in range(n_slices)]
+    slices = [
+        (int(round(i * segment_ms)), int(round((i + 1) * segment_ms)))
+        for i in range(n_slices)
+    ]
     slot_markers.set_slices_ms(slices, sample_rate=sample_rate)
     project.markers.set_slot(slot, slot_markers, is_static=False)
 
 
-def render_cell(
+def render_row(
     project,
     bank_idx,
-    cell_idx,
-    cell,
+    cells,
     events_per_cycle,
     source_slice_cache,
-    cell_render_dir,
+    row_render_dir,
 ):
-    """Render one cell into the project: per-step timesliced wavs,
-    flex slots, pattern, scenes."""
-    expanded = expand_break_names(cell['break'], events_per_cycle)
-    b = unique_preserve_order(expanded)
-    if len(b) not in ALLOWED_B:
+    """Render one tempera row into one OT bank/pattern via matrix chains."""
+    n = len(cells)
+    if n not in ALLOWED_INPUT_COUNTS:
         sys.exit(
-            f'bank {bank_idx + 1} cell {cell_idx + 1}: |B|={len(b)} '
-            f'(unique breaks {b}) not in {sorted(ALLOWED_B)}'
+            f'row {bank_idx + 1}: |C|={n} cells (allowed {sorted(ALLOWED_INPUT_COUNTS)}) — '
+            f'add or remove cells in tempera so each row has 4, 8, or 16'
         )
-    b_prime = pad_b_to_16(b)
-    cardinality = len(b)
 
-    # Pattern index per OT step. The captured pattern is
-    # `events_per_cycle` long (== 8 in tempera); the OT pattern is 16
-    # steps long (== one Strudel cycle expanded 1:1 onto a 1/16 grid,
-    # matching the existing octatrack target's mapping where each
-    # captured event spans 2 OT steps). We therefore replicate every
-    # captured slice index into 2 consecutive OT steps via i*N//16.
-    captured = cell['pattern']  # list of int|None, len events_per_cycle
-    pattern_idx_per_step = [
-        captured[i * len(captured) // N_PATTERN_STEPS]
-        for i in range(N_PATTERN_STEPS)
+    # Load source slices for every break referenced in this row, lazily.
+    for cell in cells:
+        for name in cell['break']:
+            if name not in source_slice_cache:
+                seg = load_break(source_slice_cache['__paths__'][name])
+                source_slice_cache[name] = equal_slices(seg, N_SLICES)
+
+    anchor_slice = next(s[0] for k, s in source_slice_cache.items()
+                        if k != '__paths__')
+    sample_rate = anchor_slice.frame_rate
+
+    # Render each cell to one bar of audio.
+    input_audios = [
+        render_cell_audio(cell, source_slice_cache, events_per_cycle)
+        for cell in cells
     ]
 
-    # Source slice grid: each source break wav → 16 equal slices.
-    # Cached across cells.
-    for name in b:
-        if name not in source_slice_cache:
-            seg = load_break(source_slice_cache['__paths__'][name])
-            source_slice_cache[name] = equal_slices(seg, N_SLICES)
+    bar_ms = len(input_audios[0])
+    segment_ms = bar_ms / n
 
-    # Each source slice is `slice_ms` long. All sources share a tempo
-    # in our pipeline, so we anchor on the first one.
-    anchor = source_slice_cache[b[0]]
-    slice_ms = max(1, int(round(len(anchor[0]))))
-    sample_rate = anchor[0].frame_rate
-
-    timesliced_segment_ms = N_SUB_SLICES * slice_ms
-
-    # Render the |B| unique timesliced wavs. timesliced[i] for
-    # i ∈ 0..|B|-1 differs because pattern_idx_per_step[i] differs;
-    # for |B| < 16, indices i, i+|B|, i+2|B|, … only differ if the
-    # captured pattern at those positions differs, so we *don't* try
-    # to dedup across i — we always emit N_PATTERN_STEPS unique files,
-    # one per OT step. The slot-level dedup happens through sample_lock
-    # which points multiple steps at the same slot via (i*|B|)//16.
-    # Slot count after this loop = N_PATTERN_STEPS / (16/|B|) = |B|.
-
-    # Strategy: generate one wav per *destination slot*. Slot s holds
-    # the timesliced render for any step `i` with (i*|B|)//16 == s.
-    # All such steps share the same sample_lock target, so they need
-    # one shared wav. The natural wav to emit is timesliced[step=s*16//|B|]
-    # — that's the first step in the slot's run.
-    slot_to_step = [s * 16 // cardinality for s in range(cardinality)]
-
-    cell_render_dir.mkdir(parents=True, exist_ok=True)
+    # Build N chains and bind each as a flex slot with N slice markers.
+    row_render_dir.mkdir(parents=True, exist_ok=True)
     flex_slots = []
-    for s, step in enumerate(slot_to_step):
-        seg = render_timesliced_step(
-            source_slice_cache,
-            b_prime,
-            pattern_idx_per_step[step],
-            slice_ms,
-        )
-        wav_path = cell_render_dir / f'b{bank_idx + 1:02d}p{cell_idx + 1:02d}_s{s:02d}.wav'
-        export_wav(seg, wav_path)
+    for k in range(n):
+        chain_seg = build_matrix_chain(input_audios, k, n)
+        wav_path = row_render_dir / f'b{bank_idx + 1:02d}_chain{k:02d}.wav'
+        export_wav(chain_seg, wav_path)
         slot = project.add_sample(str(wav_path.resolve()), slot_type='FLEX')
-        set_equal_slices(project, slot, N_SUB_SLICES,
-                         segment_ms=timesliced_segment_ms,
+        set_equal_slices(project, slot, n,
+                         segment_ms=segment_ms,
                          sample_rate=sample_rate)
         flex_slots.append(slot)
 
-    # Bank/Part/Pattern setup
+    # Bank/Part/Track 1 — flex, slice mode on. Default slot = chain 0
+    # so that with no scene blending the first input plays through.
     bank = project.bank(bank_idx + 1)
     part = bank.part(1)
     t1 = part.audio_track(1)
     t1.configure_flex(flex_slots[0])
     t1.setup.slice = SliceMode.ON
 
-    # Scenes: scene 1 (index 0) locks STRT to 0 (sub-slice 0 = break 0),
-    # scene 2 (index 1) locks STRT to 127 (sub-slice 15 = break 15).
-    part.scene(1).track(1).playback_param2 = 0
-    part.scene(2).track(1).playback_param2 = 127
+    # Scenes drive the input axis. Scene A → input 0, Scene B → input N-1.
+    # No per-trig slice_index lock; trigs inherit from the active scene.
+    part.scene(1).track(1).slice_index = 0
+    part.scene(2).track(1).slice_index = n - 1
     part.active_scene_a = 0
     part.active_scene_b = 1
 
-    pattern = bank.pattern(cell_idx + 1)
+    # Pattern — N trigs spaced at 16/N steps, each sample-locked to its
+    # chain. The interval is exact only when n divides 16 (= the
+    # ALLOWED_INPUT_COUNTS guarantee).
+    interval = N_PATTERN_STEPS // n
+    pattern = bank.pattern(1)
     pattern.scale_length = N_PATTERN_STEPS
     track = pattern.audio_track(1)
-    track.active_steps = list(range(1, N_PATTERN_STEPS + 1))
-    for i in range(N_PATTERN_STEPS):
-        slot_idx = (i * cardinality) // 16
-        step = track.step(i + 1)
-        step.sample_lock = flex_slots[slot_idx]
-        step.slice_index = 0
+    active_steps = [k * interval + 1 for k in range(n)]
+    track.active_steps = active_steps
+    for k, step_num in enumerate(active_steps):
+        step = track.step(step_num)
+        step.sample_lock = flex_slots[k]
 
 
 def build_project(export_path, name):
@@ -229,59 +188,52 @@ def build_project(export_path, name):
     if ctx['nSlices'] != N_SLICES:
         sys.exit(f'nSlices {ctx["nSlices"]} != {N_SLICES} (ot-doom assumes 16)')
 
-    banks_in = [b for b in (payload.get('banks') or []) if b]
-    if not banks_in:
-        sys.exit('no non-empty banks in export')
-    if len(banks_in) > 16:
-        sys.exit(f'too many banks: {len(banks_in)} > 16')
-    for i, bank in enumerate(banks_in):
-        if len(bank) > 16:
-            sys.exit(f'bank {i + 1} has {len(bank)} cells > 16')
+    rows_in = [b for b in (payload.get('banks') or []) if b]
+    if not rows_in:
+        sys.exit('no non-empty rows in export')
+    if len(rows_in) > 16:
+        sys.exit(f'too many rows: {len(rows_in)} > 16')
 
-    # Source-break manifest: download wavs from the captures' gist into
-    # the shared sample cache (also used by the existing octatrack target).
+    # Source-break manifest: download wavs into the shared sample cache
+    # (also used by the existing octatrack target so they're not
+    # re-downloaded across runs).
     manifest = fetch_sample_manifest(ctx['gistUser'], ctx['gistId'])
     cache_dir = SAMPLES_DIR / ctx['gistId']
 
-    # Collect all break names referenced across all cells.
     all_names = set()
-    for bank_cells in banks_in:
-        for cell in bank_cells:
+    for cells in rows_in:
+        for cell in cells:
             for break_name in cell['break']:
                 all_names.add(break_name)
     missing = [n for n in all_names if n not in manifest]
     if missing:
         sys.exit(f'sample gist missing breaks: {missing}')
-
     paths = {n: cache_sample(n, manifest[n], cache_dir) for n in all_names}
 
     project = Project.from_template(name.upper()[:16])
     project.settings.tempo = float(ctx['bpm'])
     project.master_track = True
 
-    # cache shared across cells: name -> List[AudioSegment] of 16 slices.
-    # We tunnel the path map through the same dict under a reserved key
-    # so render_cell can lazily load on first reference per cell.
+    # Source-slice cache shared across rows. The path map lives under a
+    # reserved key so render_row can lazy-load on first reference per
+    # row without changing the function signature.
     source_slice_cache = {'__paths__': paths}
 
-    cell_render_root = RENDER_DIR / name
-    if cell_render_root.exists():
-        # tmp dir; safe to wipe so we don't accumulate stale renders.
-        for p in cell_render_root.rglob('*'):
+    row_render_root = RENDER_DIR / name
+    if row_render_root.exists():
+        for p in row_render_root.rglob('*'):
             if p.is_file():
                 p.unlink()
 
-    for bank_idx, bank_cells in enumerate(banks_in):
-        for cell_idx, cell in enumerate(bank_cells):
-            render_cell(
-                project,
-                bank_idx,
-                cell_idx,
-                cell,
-                ctx['eventsPerCycle'],
-                source_slice_cache,
-                cell_render_root / f'bank{bank_idx + 1:02d}',
-            )
+    for bank_idx, cells in enumerate(rows_in):
+        render_row(
+            project,
+            bank_idx,
+            cells,
+            ctx['eventsPerCycle'],
+            source_slice_cache,
+            row_render_root / f'bank{bank_idx + 1:02d}',
+        )
 
     return project
 
