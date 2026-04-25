@@ -25,9 +25,19 @@ from typing import Dict, List
 from pydub import AudioSegment
 
 
+# Octatrack plays back assuming 44100 Hz; a 48 kHz source plays at
+# ~91.9% speed (= 44100/48000) and sounds "laggy". The strudel sample
+# gist mixes 44.1 and 48 kHz wavs, so we force-resample on load.
+# See OCTATRACK.md for the full constraint list.
+OT_SAMPLE_RATE = 44100
+
+
 def load_break(path: pathlib.Path) -> AudioSegment:
-    """Load a WAV as an AudioSegment. Caller may cache by path."""
-    return AudioSegment.from_wav(str(path))
+    """Load a WAV at the OT-native sample rate. Caller may cache by path."""
+    seg = AudioSegment.from_wav(str(path))
+    if seg.frame_rate != OT_SAMPLE_RATE:
+        seg = seg.set_frame_rate(OT_SAMPLE_RATE)
+    return seg
 
 
 def equal_slices(seg: AudioSegment, n_slices: int) -> List[AudioSegment]:

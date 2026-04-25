@@ -184,6 +184,12 @@ tempera changes.
 (decode/encode/concat/fade/slice) go through stdlib `wave`, so no
 ffmpeg dependency.
 
+Source wavs from the strudel sample gist mix 44.1 and 48 kHz. The OT
+expects 44.1 kHz at trig time — a 48 kHz file plays ~9% slow. `audio.py`
+resamples on load via `set_frame_rate(OT_SAMPLE_RATE)` so every chain
+ships at the native rate. See `OCTATRACK.md` for the full list of
+device-side constraints.
+
 ## File layout in the project bundle
 
 ```

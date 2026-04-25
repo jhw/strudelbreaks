@@ -153,6 +153,14 @@ def build_project(export_path, name):
     project.settings.tempo = float(ctx['bpm'])
     project.master_track = True
 
+    # NOTE: source wavs are bundled at their native sample rate (the
+    # strudel sample gist mixes 44.1 and 48 kHz). The OT plays back
+    # assuming 44.1 kHz, so 48 kHz wavs run ~9% slow. In this target
+    # each trig plays for ~1/8 note before being replaced, so the
+    # drift doesn't accumulate audibly within a trig — but if trig
+    # timing ever changes (e.g. doom-style longer holds), resample on
+    # load to OT_SAMPLE_RATE the way ot-doom/audio.py does.
+    # See OCTATRACK.md for the constraint.
     flex_slots = {}
     for n in break_names:
         path = local_paths[n]
