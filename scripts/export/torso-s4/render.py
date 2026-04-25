@@ -89,9 +89,16 @@ def cache_sample(name, url, cache_dir):
 
 
 def event_ms(bpm, beats_per_cycle, events_per_cycle):
-    """Length in ms of one captured event at the project tempo."""
+    """Length in ms of one captured event at the project tempo (float).
+
+    Kept as a float so callers can sum N events back to the exact bar
+    length — `int(round(...))` here would drop fractional ms (e.g.
+    234.375 → 234 at 128 BPM × 8 events) and the loss compounds over
+    long rows. `audio.render_cell` consumes the float and computes
+    integer-ms event boundaries cumulatively.
+    """
     cycle_s = beats_per_cycle * 60.0 / bpm
-    return int(round(cycle_s * 1000 / events_per_cycle))
+    return cycle_s * 1000 / events_per_cycle
 
 
 def unique_row_names(rng, count):

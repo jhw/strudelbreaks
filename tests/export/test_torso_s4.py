@@ -20,12 +20,20 @@ class TorsoS4HelpersTest(unittest.TestCase):
         self.render = load_render_module('torso-s4')
 
     def test_event_ms_at_120bpm(self):
-        # 120 BPM, 4 beats/cycle, 8 events/cycle → 250 ms/event.
-        self.assertEqual(self.render.event_ms(120, 4, 8), 250)
+        # 120 BPM, 4 beats/cycle, 8 events/cycle → 250 ms/event exact.
+        self.assertEqual(self.render.event_ms(120, 4, 8), 250.0)
 
     def test_event_ms_at_90bpm(self):
-        # 90 BPM, 4 beats/cycle, 8 events/cycle → 333 ms (rounded).
-        self.assertEqual(self.render.event_ms(90, 4, 8), 333)
+        # 90 BPM, 4 beats/cycle, 8 events/cycle → 333.333... ms float.
+        # Returned as float so cumulative rounding in render_cell can
+        # keep the bar length exact across long rows.
+        self.assertAlmostEqual(self.render.event_ms(90, 4, 8), 1000 / 3)
+
+    def test_event_ms_at_128bpm(self):
+        # 128 BPM, 4 beats/cycle, 8 events/cycle → 234.375 ms — the
+        # tempera default. Pre-fix this rounded down to 234, dropping
+        # 12 ms across a 4-cell × 8-event row.
+        self.assertAlmostEqual(self.render.event_ms(128, 4, 8), 234.375)
 
     def test_unique_row_names_are_distinct(self):
         import random
@@ -106,6 +114,60 @@ class TorsoS4RoundtripTest(unittest.TestCase):
             # rounded durations covers a 2 s row and a 4 s row.
             rounded = sorted(round(d, 1) for d in durations)
             self.assertEqual(rounded, [2.0, 4.0])
+
+    def test_row_length_is_exact_at_fractional_event_ms(self):
+        # 128 BPM × 8 events/cycle = 234.375 ms/event. Pre-fix this
+        # truncated to 234, so 4 cells × 8 events = 7488 ms instead of
+        # the true 7500 ms. Cumulative-rounding event boundaries fix
+        # the drift.
+        render = load_render_module('torso-s4')
+        with WorkDir() as wd:
+            paths = make_break_wavs(wd.samples, ['a'], bpm=128, steps=32)
+            stub_sample_fetch(render, paths)
+            payload = make_export([
+                [make_capture_cell(['a'], [0, 1, 2, 3, 4, 5, 6, 7])
+                 for _ in range(4)],
+            ], bpm=128)
+            wd.write_export(payload)
+
+            render.OUTPUT_DIR = wd.root / 'out'
+            render.RENDER_DIR = wd.root / 'render'
+            zip_path = render.render(wd.export_path, 'TORSODRIFT', seed=1)
+
+            extract = wd.root / 'extract'
+            extract.mkdir()
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                zf.extractall(extract)
+            wav = next((extract / 'TORSODRIFT').glob('*.wav'))
+            with wave.open(str(wav), 'rb') as r:
+                duration_ms = r.getnframes() * 1000 / r.getframerate()
+            # 4 cells × 8 events × 234.375 ms = 7500 ms, exact.
+            # Allow ±1 ms slack for the final-event-rounding tail.
+            self.assertAlmostEqual(duration_ms, 7500, delta=1)
+
+    def test_output_wavs_are_at_s4_sample_rate(self):
+        # Source breaks come from a mixed-rate gist; the renderer must
+        # ship at the S-4 ceiling (96 kHz) per TORSO-S4.md.
+        render = load_render_module('torso-s4')
+        with WorkDir() as wd:
+            paths = make_break_wavs(wd.samples, ['a'], bpm=120, steps=32)
+            stub_sample_fetch(render, paths)
+            payload = make_export([
+                [make_capture_cell(['a'], [0, 1, 2, 3, 4, 5, 6, 7])],
+            ])
+            wd.write_export(payload)
+
+            render.OUTPUT_DIR = wd.root / 'out'
+            render.RENDER_DIR = wd.root / 'render'
+            zip_path = render.render(wd.export_path, 'TORSORATE', seed=1)
+
+            extract = wd.root / 'extract'
+            extract.mkdir()
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                zf.extractall(extract)
+            wav = next((extract / 'TORSORATE').glob('*.wav'))
+            with wave.open(str(wav), 'rb') as r:
+                self.assertEqual(r.getframerate(), 96000)
 
     def test_filenames_are_deterministic_under_same_seed(self):
         render = load_render_module('torso-s4')
