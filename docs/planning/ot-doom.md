@@ -43,152 +43,182 @@ target's bank-of-patterns behaviour.
 
 For each strudel cell:
 
-1. **Materialise the source breakbeats from the cell's break vocabulary.**
-   The cell stores a list of break names (Strudel `{a b c d}%N` polymetric
-   form, expanded via STRUDEL.md's `i*M//N` rule). The unique break names
-   in the cell are the "input breaks" — call this set B, with |B| ≤ 4
-   (Tempera caps `BREAK_ALT_NAMES_MAX` at 1 so |B| is usually 2). We pad
-   B by repeating until it has K=16 entries: `B' = [B[0], B[1], …, B[k-1],
-   B[0], B[1], …]`. We don't pad with silence; we *want* duplicates so
-   every fader position lands on real audio.
+1. **Identify the source breakbeats.** The cell stores a list of break
+   names (Strudel `{a b c d}%N` polymetric form, expanded via STRUDEL.md's
+   `i*M//N` rule). Let `B = unique(cell.break)` — the input breaks. We
+   require `|B| ∈ {4, 8, 16}` (see "|B| validation" below). Pad `B` by
+   repetition until `|B'| = 16`: `B' = [B[0], B[1], …, B[|B|-1], B[0], …]`.
+   Padding-by-repeat (rather than silence) ensures every fader position
+   lands on real audio.
 
-2. **Render 16 output breaks.** Each output break i (0 ≤ i < 16) is a
-   bar-length (eventsPerCycle-step) audio rendering of the cell's pattern,
-   but where every event sources from `B'[i]`'s break wav. This is what
-   the user's prompt calls "the first layer of rendering". Each output
-   break is therefore an audio file: `[slice_p0(B'[i]), slice_p1(B'[i]),
-   …, slice_p7(B'[i])]` concatenated with small fades, where `p_j` is the
-   captured pattern's slice index at event j and `slice_*` is taken from
-   the source wav's 16-equal-slice grid.
-   - Source break wavs are 32 1/16-steps long; 16 equal slices => 2 steps
-     per slice (same as the existing octatrack target).
-   - Render duration: `eventsPerCycle * (slice_step_len)` = 8 * 2 steps =
-     16 steps = 1 bar at the project tempo. We fix this to 16 1/16 steps
-     so the OT pattern grid maps 1:1.
-   - Rests (`slice_idx is None`) become silence frames of one slice's
-     length.
-   - Fades: 2 ms fade-in and 2 ms fade-out on every concatenated slice
-     (a tiny click guard — bigger fades audibly soften the transients we
-     want).
+2. **Render the 16 timesliced wavs in one pass.** For each step
+   `i ∈ 0..15` (one per OT pattern step), and each break-position
+   `j ∈ 0..15` (one per sub-slice in the timesliced wav):
 
-3. **Time-slice the 16 output breaks.** For every step i (0..15), take
-   the i-th equal-step slice of every output break and concatenate them
-   in break-order. Result: 16 timesliced wavs, one per pattern step,
-   each wav containing 16 sub-slices (one per output break). This is the
-   "second layer", and it's exactly what the elektronauts post calls
-   for: each timesliced wav holds break 0's slice-i, then break 1's
-   slice-i, ... then break 15's slice-i.
+   ```
+   sub_slice[i][j] = source_slice( B'[j], pattern_idxs[i] )
+   timesliced[i]   = concat_over_j(sub_slice[i][0..15]) with fades
+   ```
 
-4. **Bind to slot manager.** Each timesliced wav becomes one Flex sample
-   slot via `project.add_sample(path, slot_type='FLEX')` — 16 slots per
-   bank. Each slot is then sliced into 16 equal slices via the existing
-   `set_equal_slices` helper (copy-pasted from `octatrack/render.py` —
-   the helper itself is generic).
+   where `source_slice(name, k)` is the k-th of 16 equal slices of the
+   wav for break `name`, and `pattern_idxs[i]` is the captured Strudel
+   pattern's slice index at event `i` (or `None` for a rest →
+   silence-segment of one slice's length).
 
-5. **Pattern.** A 16-step pattern; trig at every step `i`; step `i` is
-   sample-locked to timesliced slot `i` and slice-index-locked to slice
-   0 (the leftmost = break 0). We do **not** spread sample locks across
-   steps the way the existing target does; here, *every step i* gets
-   slot i, sliced[0]. The step-to-slot mapping is the diagonal — and
-   that's what makes the per-step-grain timeslicing audible.
+   Source break wavs are 32 1/16-steps long; 16 equal slices → 2
+   steps per slice (same as the existing octatrack target). Each
+   timesliced wav therefore contains `16 * (2/16-step)` = 2 bars of
+   audio at the project tempo, and itself slices into 16 sub-slices
+   of 2 1/16-steps each.
 
-6. **Track SRC config.** On the part, audio track 1 is configured Flex
-   (default slot = slot 1). We then set:
-   - `t1.setup.slice = SliceMode.ON` — slice mode on, so STRT selects
-     a slice instead of a linear position. This is the lever the
-     scenes pull.
-   - `length_mode` we leave at its octapy default (`TIME`, length=127).
-     With slice mode on, length=127 means "play the full slice"; that's
-     what we want.
-   - We do not need to touch length_mode further (the existing target
-     also leaves it alone).
+   See "One pass, not two" below for why this is a direct mapping
+   rather than two render layers.
 
-7. **Scenes.** On the bank's part 1, configure two scenes (1 and 2),
+3. **Bind to slot manager.** Each *unique* timesliced wav is added
+   via `project.add_sample(path, slot_type='FLEX')` — that's 16, 8,
+   or 4 flex slots per bank depending on `|B|`. Each slot is then
+   sliced into 16 equal slices via the existing `set_equal_slices`
+   helper (copy-pasted from `octatrack/render.py` — the helper itself
+   is generic).
+
+   Why fewer unique slots when `|B| < 16`? Because of the structure
+   of `B'`: padding-by-repeat means `B'[j] = B'[j + |B|]`, and since
+   `pattern_idxs` doesn't depend on `j`, the resulting `timesliced[i]`
+   wavs are pairwise identical at offsets `i, i+|B|, …`. The slot
+   manager dedups by ot_path, so we only emit `|B|` unique files.
+
+4. **Pattern.** A 16-step pattern; trig at every step `i`. Sample
+   lock per the `|B|`-aware mapping:
+
+   ```
+   step i → timesliced slot index = (i * |B|) // 16
+   ```
+
+   - `|B| = 16`: diagonal — step `i` → slot `i`.
+   - `|B| = 8`: each slot covers 2 consecutive steps.
+   - `|B| = 4`: each slot covers 4 consecutive steps (steps 0–3 →
+     slot 0, …, steps 12–15 → slot 3).
+
+   Every step's `slice_index` is locked to 0 (= break 0 = scene-A).
+   The crossfader sweeps STRT to walk into sub-slices 1..15.
+
+5. **Track SRC config.** On the part, audio track 1 is configured
+   Flex (default slot = slot 1):
+   - `t1.setup.slice = SliceMode.ON` — slice mode on, so STRT
+     selects a slice instead of a linear position. This is the lever
+     the scenes pull, and it's the only mandatory SRC tweak.
+   - `length_mode` left at octapy's default (`TIME`, length=127).
+     With slice mode on + length=127, the OT plays the *full*
+     selected slice. We don't need to change this.
+
+6. **Scenes.** On the bank's part 1, configure two scenes (1 and 2),
    each one locking track 1's `playback_param2` (STRT, the slice
    selector):
-   - Scene 1: `track(1).playback_param2 = 0` → slice 0 (= break 0
-     across every step).
-   - Scene 2: `track(1).playback_param2 = 127` → with 16 slices, the
-     STRT range 0..127 is quantised across slices, so 127 selects the
-     last slice = break 15.
+   - Scene 1: `track(1).playback_param2 = 0` → slice 0
+     (`= break 0` across every step).
+   - Scene 2: `track(1).playback_param2 = 127` → slice 15
+     (`= break 15` across every step). With 16 slices, the STRT range
+     0..127 quantises across slices, so 127 selects the last slice.
 
    Then `part.active_scene_a = 0; active_scene_b = 1` (zero-indexed).
-   Now the crossfader sweeps continuously across the 16 sub-slices of
-   each timesliced wav, which is exactly "switch dynamically between
-   different breaks" because of the way the timesliced wavs are laid
-   out (slice j of timesliced[i] = step-i of break-j).
+   The crossfader continuously interpolates STRT between 0 and 127,
+   walking through sub-slices 0..15 of every timesliced wav — which
+   is exactly "switch dynamically across breaks" by construction
+   (slice `j` of `timesliced[i]` = step-i of break-j).
 
-## Mapping fewer than 16 unique breaks
+## |B| validation
 
-If |B| = 4 (the common case):
+The renderer requires `|B| ∈ {4, 8, 16}` per cell. These are the
+divisors of 16 that distribute cleanly under the
+`step → slot = (i * |B|) // 16` mapping; any other count creates
+uneven slot stretches, ambiguous fader behaviour, or both.
 
-- Rendering: still 4 *unique* output breaks. We render each once and
-  reuse the audio.
-- Timeslicing: still 4 *unique* timesliced wavs. We render each once.
-- Slots: only 4 unique flex slots. We assign 4 slots, one per
-  timesliced wav.
-- Steps: still 16 trigs in the pattern. Steps are sample-locked
-  according to the user's distribution rule:
-  ```
-  step i → timesliced slot index = (i * |B|) // 16
-  ```
-  i.e., steps 0..3 → slot 0, 4..7 → slot 1, 8..11 → slot 2, 12..15 →
-  slot 3 (the polymetric stretch from STRUDEL.md, applied to step
-  index → slot index).
-- Each per-step `slice_index` is still 0.
-- Scenes still lock STRT to 0 / 127.
+If a cell has `|B| ∉ {4, 8, 16}` (including the very common
+`|B| = 1` or `|B| = 2` from current Tempera defaults), the renderer
+exits with a clear message naming the offending bank/cell and the
+unique break names found. No silent padding to the nearest power.
+The error is the contract — fix the source template to produce
+4/8/16 unique names per cell.
 
-Each timesliced slot is itself sliced into 16 sub-slices the same way
-as the |B|=16 case (the slot has 16 sub-slices because each output
-break has 16 step-positions, regardless of how many unique output
-breaks there are). The crossfader still sweeps across "which break"
-for that step.
+> **Note on Tempera compatibility.** Tempera as configured today
+> emits cells with `|B| ≤ 2` (see `BREAK_ALT_NAMES_MIN/MAX = 1` and
+> `BREAK_ALT_SLOTS_MIN/MAX = 1..2` in `tempera.strudel.js`). This
+> exporter therefore won't accept current Tempera captures
+> unmodified. Adapting the source template (raise alt-name caps, or
+> use a different Strudel template that emits 4/8/16-name vocabs)
+> is a prerequisite — out of scope for this milestone.
 
-That gives the requested "max dynamic behaviour" for fewer-than-16
-breaks: each step uses one timesliced slot, but the slot still contains
-16 sub-slice variants, and the crossfader keeps morphing across them.
+## One pass, not two
 
-## One layer or two?
+The user's prompt frames the render as two layers:
 
-The user's prompt asks whether we can collapse layer 1 (output breaks)
-and layer 2 (timesliced) into a single rendering pass. The answer is
-**no, not without changing the technique**.
+- Layer 1: 16 *output breaks*, each a bar-long render of the cell's
+  pattern through one source break.
+- Layer 2: time-slice each output break into 16 slices and transpose
+  → 16 *timesliced wavs*.
 
-- Layer 1 sequences slices *of source breaks* into rhythmic
-  output bars: it's a per-cell render driven by the captured Strudel
-  pattern.
-- Layer 2 transposes layer 1's output: slice i of timesliced[step] =
-  layer1_output[step]'s i-th sub-slice. It's a transpose
-  (axis swap), not a reorder.
+Algebraically the two layers compose into a direct mapping:
 
-If we tried to skip layer 1 and concatenate "first slice of each
-source break, second slice of each source break, …" directly, we'd
-ignore the captured Strudel pattern entirely — every step would just
-walk through the source-break grid in order, regardless of what the
-captured cell asked for.
+```
+output_break[j].slice_at(i) = source_slice( B'[j], pattern_idxs[i] )
+                            = sub_slice[i][j]
+timesliced[i]               = concat_over_j(sub_slice[i][0..15])
+```
 
-So: two render passes are necessary, but layer 2 is a pure transpose
-of layer 1's output and can be implemented as an in-memory numpy/
-pydub operation without an intermediate file write per output break.
+So in production we skip the intermediate output-break audio and
+build each `timesliced[i]` straight from `source_slice(B'[j],
+pattern_idxs[i])`. No layer-1 buffers, no in-memory transpose
+step.
 
-In code: we render layer 1 in memory only (`pydub.AudioSegment` per
-output break), then transpose those 16 segments into 16 timesliced
-segments, only writing to disk for the 16 (or |B|) timesliced wavs
-that the slot manager needs.
+Layer 1 is still useful conceptually, and as a debug surrogate
+(audition any single break played through the captured pattern by
+re-assembling `output_break[j]` from `sub_slice[*][j]`). But the
+shipped renderer is one pass.
+
+## Fades, pops, and attack crispness
+
+Pop/click risk lives at slice boundaries: the **end** of one slice
+hitting the **start** of the next. Beat attacks (kicks, snares)
+sit in the first ~5–20 ms of a slice; symmetric fades round those
+attacks audibly.
+
+Asymmetric envelope:
+
+- **Fade-out**: 2–3 ms cosine ramp at every slice's *tail*. The
+  tail is mid-decay anyway, so this is inaudible-soft and
+  eliminates the discontinuity into the next slice's transient.
+- **Fade-in**: 0.3–0.5 ms (~15–22 samples at 44.1 kHz). A
+  pure click guard, sub-perceptual on a transient — the attack
+  envelope itself dominates anything we'd add. We do *not* skip
+  fade-in entirely: even a perfectly aligned slice can start at
+  a non-zero sample, and that DC step pops.
+
+This matches the user's intent ("only small ones, particularly
+fade in").
+
+Open option for v2: equal-power crossfade between adjacent
+sub-slices (~1 ms overlap) instead of independent fade-out + fade-in.
+That's mathematically cleaner (no double-attenuation in the overlap
+region) but more code; defer until field testing shows the
+asymmetric-fade approach has audible artefacts.
+
+Rests (`pattern_idxs[i] is None`) become silence segments of one
+slice's length — they get the same fade-in/out treatment for
+consistency, but on silence both are no-ops.
 
 ## Audio dependencies
 
-- Add `pydub>=0.25` to `requirements.txt` and install in the existing
-  venv. pydub uses ffmpeg only for non-WAV codecs; pure-WAV operations
-  (decode/encode/concat/fade/slice) are stdlib-only via the `wave`
-  module, so no extra system dependency.
+- Add `pydub>=0.25` to `requirements.txt` and install in the
+  existing venv. pydub uses ffmpeg only for non-WAV codecs;
+  pure-WAV operations (decode/encode/concat/fade/slice) go through
+  stdlib `wave`, so no extra system dependency.
 
 ## File layout in the project bundle
 
-For a row producing 16 unique timesliced wavs, the slot pool fills
-1..16. The flex_count auto-update logic in `Project.add_sample` keeps
-banks in sync. Filenames are namespaced per bank/cell to avoid
-collisions:
+For a cell with `|B| = 16`, the slot pool fills 1..16. With
+`|B| = 4`, only 1..4. The `flex_count` auto-update logic in
+`Project.add_sample` keeps banks in sync. Filenames are namespaced
+per bank/cell so reuse across cells is safe but explicit:
 
 ```
 ot-doom-<name>.zip
@@ -200,12 +230,11 @@ ot-doom-<name>.zip
     ├── b01p01_t00.wav     # bank 1 pattern 1 timeslice 0
     ├── b01p01_t01.wav
     ├── …
-    ├── b01p01_t15.wav
-    └── …
+    └── b01p01_t15.wav
 ```
 
-(Reusing across cells: if the same set of breaks + pattern produces
-identical timesliced wavs, the slot manager dedups by `ot_path`.)
+(Identical timesliced wavs across cells dedup via the slot manager's
+`ot_path` key.)
 
 ## Implementation steps
 
@@ -213,62 +242,64 @@ identical timesliced wavs, the slot manager dedups by `ot_path`.)
    `__init__.py` (so common imports work), copy the four push/clean
    scripts, retarget `tmp/octatrack/` → `tmp/ot-doom/` in each.
 2. **Add `pydub`** to `requirements.txt`; install in `.venv`.
-3. **Audio helpers.** New module
-   `scripts/export/ot-doom/audio.py` with:
+3. **Audio helpers.** New module `scripts/export/ot-doom/audio.py`
+   with:
    - `load_break_wav(path) → AudioSegment` (cached by path).
    - `slice_break(seg, n_slices=16) → list[AudioSegment]` — equal
-     slices.
-   - `render_output_break(slices, pattern_idxs, fade_ms=2) →
-     AudioSegment` — concatenate slices per the cell's Strudel
-     pattern, with fades. Rests get silence segments matching slice
-     length.
-   - `transpose_to_timesliced(output_breaks: list[AudioSegment])
-     → list[AudioSegment]` — axis swap.
-4. **Render module.**
-   `scripts/export/ot-doom/render.py`, modelled on
-   `octatrack/render.py`:
-   - Load + validate export (same `REQUIRED_CTX` plus we need
-     `eventsPerCycle == 8` and `nSlices == 16`).
-   - For each non-empty bank-cell, expand the polymetric break to
-     a per-event break-name list (reuse the existing
-     `expand_cell` helper — copy or factor into a shared module),
-     compute B' (length 16, source breaks padded), render layer 1
-     and layer 2 in memory, write timesliced wavs to a per-cell
-     temp dir, call `project.add_sample` and `set_equal_slices`
-     for each.
-   - Configure track 1 Flex on the default slot, set
+     slices of one source wav.
+   - `render_timesliced(source_slices, b_prime, pattern_idxs,
+     fade_in_ms=0.4, fade_out_ms=2.5) → AudioSegment` — build one
+     timesliced wav by concat over `j ∈ 0..15` of
+     `source_slices[B'[j]][pattern_idxs[i]]` (or silence on rest)
+     with the asymmetric fade envelope.
+4. **Render module.** `scripts/export/ot-doom/render.py`, modelled
+   on `octatrack/render.py`:
+   - Load + validate export (same `REQUIRED_CTX`; require
+     `eventsPerCycle == 8`, `nSlices == 16`).
+   - Per cell, compute `B = unique(cell.break)` and exit if
+     `|B| ∉ {4, 8, 16}`.
+   - Load source slices for each name in `B` (cache by name across
+     cells).
+   - For each step `i ∈ 0..15`, render `timesliced[i]` in memory;
+     write only the `|B|` unique files (the first `|B|` indices,
+     since the rest dedup) to a per-cell temp dir.
+   - `project.add_sample(path)` for each unique file →
+     `set_equal_slices(slot, 16)`.
+   - Configure track 1 Flex on slot 1, set
      `setup.slice = SliceMode.ON`.
    - Build the 16-step pattern: every step active, sample_lock per
-     the |B|-aware mapping `(i * |B|) // 16`, slice_index = 0.
-   - Build scenes 1 and 2 with `playback_param2 = 0` and `127`
-     respectively; set `active_scene_a = 0`, `active_scene_b = 1`.
+     `(i * |B|) // 16`, slice_index = 0.
+   - Build scenes 1 and 2 with `playback_param2 = 0` and `127`;
+     set `active_scene_a = 0`, `active_scene_b = 1`.
    - `project.to_zip(OUTPUT_DIR / f'{name}.zip')`.
-5. **Smoke test** with a tiny export: 1 row × 1 cell, 4 unique
-   breaks, verify the zip extracts to a valid project layout, the
-   markers.work has 16 slices per slot, and the bank file references
-   slot 1..k correctly.
+5. **Smoke test** with a synthetic export of one cell at `|B| = 4`,
+   verify: zip extracts to a valid project layout, `markers.work`
+   has 16 slices per of the 4 slots, bank file references slots
+   1..4, scenes 1+2 lock STRT, the 16 trigs sample-lock to the
+   right slot via `(i*4)//16`.
 6. **Wire up CLI parity** with the existing target — same args,
    same `common.cli` parser.
 
 ## Open questions / risks
 
-- Sample length normalisation: the existing target hands each
-  source break to OT untouched. Here, layer 1's output is fixed at
-  16 1/16-steps regardless of source break tempo. If a source
-  break wav isn't already at the project BPM, our layer 1 render
-  will be the wrong duration. Mitigation: assume source breaks are
-  at the project tempo (the gist already curates them so), and add
-  a length sanity check (warn if abs(source_duration_steps - 32) >
-  0.5).
-- 128-slot ceiling: 16 banks × 1 cell × 16 timesliced wavs = 256
-  slots, exceeds the 128-slot pool. Mitigation: build per-bank
-  projects (one zip per row) when total slot demand exceeds 128.
-  For the initial milestone, assume small exports (≤8 banks × 16
-  slots = 128).
-- Static vs Flex: prompt didn't specify. Flex is RAM and matches
-  the existing target's choice; static would let us go bigger but
-  streams from CF. Default Flex.
-- Length mode: leaving at octapy default (TIME, len=127). The
-  forum thread doesn't actually require changing this — slice
-  mode on is the only mandatory SRC tweak. If field testing shows
-  artefacts at slice boundaries, revisit.
+- **Source-break tempo.** Layer-1 timing is fixed in 1/16-steps at
+  the project tempo. If a source wav isn't already at project tempo
+  (= 32 1/16-steps long for the canonical 2-bar break), the
+  resulting timesliced wav has the wrong groove. Mitigation: warn
+  when `abs(source_duration_steps - 32) > 0.5` and let the user
+  decide whether to ship.
+- **128-slot ceiling.** 16 banks × 1 cell × 16 timesliced wavs =
+  256 slots, exceeds the 128 flex pool. With `|B|=4` it's 64 slots
+  total — fine. With `|B|=16` we'd need to split into per-bank
+  projects when total demand > 128.
+- **Static vs Flex.** Default Flex (matches the existing target,
+  RAM-fast, simpler). Static would let us pack more samples but
+  streams from CF; revisit only if 128-slot becomes the binding
+  constraint.
+- **Length mode.** Leaving at octapy default (`TIME`, len=127). The
+  forum thread doesn't require changing this — slice mode on is the
+  only mandatory SRC tweak. Revisit if field testing shows artefacts
+  at sub-slice boundaries.
+- **Crossfade vs independent fades.** Asymmetric independent fades
+  are the v1 choice. If sub-slice boundaries audibly click on real
+  hardware, switch to a 1ms equal-power crossfade.
