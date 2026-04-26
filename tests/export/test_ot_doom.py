@@ -31,9 +31,10 @@ from ._fixtures import (
 
 
 def _load_audio_module():
-    """Load `scripts/export/ot-doom/audio.py` as a fresh module so tests
-    don't share monkey-patch state with the renderer's own import."""
-    target_dir = EXPORT_ROOT / 'ot-doom'
+    """Load `scripts/export/octatrack/ot-doom/audio.py` as a fresh module
+    so tests don't share monkey-patch state with the renderer's own
+    import."""
+    target_dir = EXPORT_ROOT / 'octatrack' / 'ot-doom'
     audio_path = target_dir / 'audio.py'
     for path in (str(EXPORT_ROOT), str(target_dir)):
         if path not in sys.path:
@@ -142,7 +143,7 @@ class OtDoomCellCountValidationTest(unittest.TestCase):
     """|C| (cells per row) must be in {4, 8, 16}."""
 
     def _build_render(self, n_cells, wd):
-        render = load_render_module('ot-doom')
+        render = load_render_module('octatrack/ot-doom')
         paths = make_break_wavs(wd.samples, ['a', 'b'], bpm=120)
         wd.stub_sources(paths)
         payload = make_export([_make_cells(n_cells)])
@@ -188,7 +189,7 @@ class OtDoomBankPackingTest(unittest.TestCase):
     bank 2 on the 17th row. Within a bank every row must share |C|."""
 
     def _setup_render(self, wd, rows):
-        render = load_render_module('ot-doom')
+        render = load_render_module('octatrack/ot-doom')
         paths = make_break_wavs(wd.samples, ['a', 'b'], bpm=120, steps=32)
         wd.stub_sources(paths)
         payload = make_export(rows)
@@ -277,7 +278,7 @@ class OtDoomRoundtripTest(unittest.TestCase):
     """End-to-end smoke test: one row, |C|=4, full project layout."""
 
     def test_4_cell_row_produces_expected_layout(self):
-        render = load_render_module('ot-doom')
+        render = load_render_module('octatrack/ot-doom')
         with WorkDir() as wd:
             paths = make_break_wavs(wd.samples, ['kk', 'sn'], bpm=120, steps=32)
             wd.stub_sources(paths)

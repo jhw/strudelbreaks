@@ -1,6 +1,6 @@
 # Octatrack export
 
-Per-target notes for `scripts/export/octatrack/` (per-cell-pattern
+Per-target notes for `scripts/export/octatrack/ot-basic/` (per-cell-pattern
 target). Device-side constraints are also referenced from
 `docs/export/ot-doom.md`.
 
@@ -16,17 +16,17 @@ into 16-slice flex slots once per project.
 CLI:
 
 ```
-python scripts/export/octatrack/render.py <export.json>
+python scripts/export/octatrack/ot-basic/render.py <export.json>
     [--name NAME] [--seed N]
     [--probability 0..1]
     [--source {json,wav}]
 ```
 
-Output: `tmp/octatrack/<name>.zip`.
+Output: `tmp/ot-basic/<name>.zip`.
 
 `--probability` (default 1.0 = always fires) snaps to the nearest
 Octatrack `TrigCondition.PERCENT_*` bucket and applies it to every
-captured trig. See `scripts/export/octatrack/render.py` for the bucket
+captured trig. See `scripts/export/octatrack/ot-basic/render.py` for the bucket
 list.
 
 ## Source mode (`--source`)
@@ -68,7 +68,7 @@ export. JSON-source mode satisfies this by rendering at 44.1 kHz
 up-front (the recommended path). WAV-source mode bundles the gist
 files as-is — a latent bug that's only inaudible because trigs are
 short; if anyone ever lengthens the trig timing, switch to JSON mode
-or resample on load (the way `ot-doom/audio.py` does).
+or resample on load (the way `octatrack/ot-doom/audio.py` does).
 
 ## Other constraints worth knowing
 

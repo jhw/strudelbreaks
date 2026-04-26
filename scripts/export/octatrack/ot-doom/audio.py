@@ -27,7 +27,7 @@ from pydub import AudioSegment
 
 # Cross-subdir import: scripts/export/ on path so we can pull the
 # shared device-rate constant. Mirrors the trick render.py uses.
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent))
 
 from common.devices import OT_SAMPLE_RATE  # noqa: E402
 

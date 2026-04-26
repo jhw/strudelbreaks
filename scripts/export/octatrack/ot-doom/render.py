@@ -34,7 +34,7 @@ between source breaks rather than between captured patterns). See
 docs/export/ot-doom.md for the full design + comparison.
 
 Usage:
-    python scripts/export/ot-doom/render.py <path/to/export.json> [--name NAME] [--seed N]
+    python scripts/export/octatrack/ot-doom/render.py <path/to/export.json> [--name NAME] [--seed N]
 
 Output:
     tmp/ot-doom/<name>.zip
@@ -44,7 +44,7 @@ from __future__ import annotations
 import pathlib
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent))
 
 from octapy import (
     Project,
@@ -67,7 +67,7 @@ from audio import (
 
 # Source break wavs are 32 steps (2 bars at 1/16). N_SLICES=16 cuts them
 # into 16 slices of 2 steps each — same scheme as the existing octatrack
-# target. See scripts/export/octatrack/render.py for the ghost-beat
+# target. See scripts/export/octatrack/ot-basic/render.py for the ghost-beat
 # rationale.
 N_SLICES = 16
 N_PATTERN_STEPS = 16          # 1 bar at 1/16 — one Strudel cycle.
@@ -78,7 +78,7 @@ MAX_BANKS = 16                # OT project capacity.
 FLEX_SLOT_LIMIT = 128         # OT project-wide flex pool.
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent.parent.parent
+REPO_ROOT = SCRIPT_DIR.parent.parent.parent.parent
 OUTPUT_DIR = REPO_ROOT / 'tmp' / 'ot-doom'
 RENDER_DIR = REPO_ROOT / 'tmp' / 'ot-doom-render'
 

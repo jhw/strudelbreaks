@@ -14,10 +14,10 @@ tmp/samples/<gistId>/. Each sample slot gets 16 equal slice markers so the
 slice_index p-locks resolve on-device.
 
 Usage:
-    python scripts/export/octatrack/render.py <path/to/export.json> [--name NAME] [--seed N]
+    python scripts/export/octatrack/ot-basic/render.py <path/to/export.json> [--name NAME] [--seed N]
 
 Output:
-    tmp/octatrack/<name>.zip
+    tmp/ot-basic/<name>.zip
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ import pathlib
 import sys
 import wave
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent))
 
 from octapy import (
     Project,
@@ -75,8 +75,8 @@ PROBABILITY_BUCKETS = [
 ]
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent.parent.parent
-OUTPUT_DIR = REPO_ROOT / 'tmp' / 'octatrack'
+REPO_ROOT = SCRIPT_DIR.parent.parent.parent.parent
+OUTPUT_DIR = REPO_ROOT / 'tmp' / 'ot-basic'
 
 REQUIRED_CTX = ('gistUser', 'gistId', 'bpm', 'eventsPerCycle', 'nSlices')
 

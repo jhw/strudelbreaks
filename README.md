@@ -192,8 +192,8 @@ into device-specific formats:
 
 | Target | Output | Doc |
 |---|---|---|
-| `octatrack/` | OT project zip — one bank per row, one pattern per cell | [docs/export/octatrack.md](docs/export/octatrack.md) |
-| `ot-doom/` | OT project zip — megabreak-of-doom matrix chains | [docs/export/ot-doom.md](docs/export/ot-doom.md) |
+| `octatrack/ot-basic/` | OT project zip — one bank per row, one pattern per cell | [docs/export/octatrack.md](docs/export/octatrack.md) |
+| `octatrack/ot-doom/` | OT project zip — megabreak-of-doom matrix chains | [docs/export/ot-doom.md](docs/export/ot-doom.md) |
 | `torso-s4/` | Torso S-4 sample bundle — one WAV per row | [docs/export/torso-s4.md](docs/export/torso-s4.md) |
 | `strudel/` | Standalone `.strudel.js` playback template | [docs/export/strudel.md](docs/export/strudel.md) |
 

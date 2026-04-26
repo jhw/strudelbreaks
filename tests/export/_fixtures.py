@@ -1,10 +1,12 @@
 """Shared fixtures for the export-target test suite.
 
-Each renderer is reachable from `<repo>/scripts/export/<target>/render.py`.
-Two of the targets (octatrack, strudel) live in importable directory names;
-the third (`ot-doom`) has a hyphen, which Python won't import as a package.
-`load_render_module` handles both: it injects `scripts/export` and the
-target's own directory into `sys.path` so that `import render` works.
+Each renderer is reachable from `<repo>/scripts/export/<target>/render.py`,
+where `<target>` is one of `octatrack/ot-basic`, `octatrack/ot-doom`,
+`torso-s4`, or `strudel`. Hyphenated dir names can't be imported as
+packages, so `load_render_module` goes through importlib.util directly:
+it injects `scripts/export` and the target's own directory into
+`sys.path` so that `import render` (and the target's sibling `audio.py`,
+when present) work.
 
 The renderers all do remote work in production (fetch a sample manifest
 from a gist, download wavs). Tests stub those out. We synthesise tiny
@@ -55,7 +57,7 @@ def load_render_module(target: str):
     # bleed into this load.
     for cached in ('audio',):
         sys.modules.pop(cached, None)
-    mod_name = f'_test_render_{target.replace("-", "_")}'
+    mod_name = f'_test_render_{target.replace("-", "_").replace("/", "_")}'
     sys.modules.pop(mod_name, None)
     spec = importlib.util.spec_from_file_location(mod_name, render_path)
     module = importlib.util.module_from_spec(spec)

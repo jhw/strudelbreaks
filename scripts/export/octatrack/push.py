@@ -1,13 +1,21 @@
 #!/usr/bin/env python
 """Push OT project zips to the Octatrack CF card under the strudelbeats set.
 
-Extracts .zip files from tmp/octatrack/ into /Volumes/OCTATRACK/strudelbeats/.
+Shared by both Octatrack export targets (`ot-basic` and `ot-doom`).
+The first positional arg picks the target; remaining args mirror the
+single-target script (a name fragment to filter by, plus -f to skip
+prompting).
+
+Each target's zips live in `tmp/<target>/` and get extracted into
+`/Volumes/OCTATRACK/strudelbeats/`.
 
 Usage:
-    push.py              # list all, ask per project
-    push.py pattern      # filter by name fragment, ask per project
-    push.py -f           # copy all without prompting (skip existing)
-    push.py -f pattern   # copy matching without prompting
+    push.py <target>                  # list all, ask per project
+    push.py <target> pattern          # filter by name fragment, ask per project
+    push.py <target> -f               # copy all without prompting (skip existing)
+    push.py <target> -f pattern       # copy matching without prompting
+
+  <target> ∈ {ot-basic, ot-doom}
 """
 
 import argparse
@@ -17,15 +25,20 @@ import zipfile
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent
-SOURCE_DIR = REPO_ROOT / 'tmp' / 'octatrack'
+TARGETS = ('ot-basic', 'ot-doom')
 OT_DEVICE = pathlib.Path('/Volumes/OCTATRACK')
 OT_SET = OT_DEVICE / 'strudelbeats'
 
 
-def find_projects(pattern=None):
-    if not SOURCE_DIR.exists():
+def source_dir(target):
+    return REPO_ROOT / 'tmp' / target
+
+
+def find_projects(target, pattern=None):
+    src = source_dir(target)
+    if not src.exists():
         return []
-    projects = list(SOURCE_DIR.glob('*.zip'))
+    projects = list(src.glob('*.zip'))
     if pattern:
         pl = pattern.lower()
         projects = [p for p in projects if pl in p.name.lower()]
@@ -68,15 +81,16 @@ def extract_project(zip_path):
     return sample_count
 
 
-def push(pattern=None, force=False):
+def push(target, pattern=None, force=False):
     if not OT_DEVICE.exists():
         print(f'Error: Octatrack not found at {OT_DEVICE}')
         sys.exit(1)
     OT_SET.mkdir(parents=True, exist_ok=True)
 
-    projects = find_projects(pattern)
+    src = source_dir(target)
+    projects = find_projects(target, pattern)
     if not projects:
-        print('No .zip files found in tmp/octatrack/')
+        print(f'No .zip files found in {src.relative_to(REPO_ROOT)}/')
         return
 
     print(f'Found {len(projects)} project(s):')
@@ -100,10 +114,12 @@ def push(pattern=None, force=False):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument('target', choices=TARGETS,
+                    help='which Octatrack export target to push')
     ap.add_argument('pattern', nargs='?', default=None)
     ap.add_argument('-f', '--force', action='store_true')
     args = ap.parse_args()
-    push(args.pattern, args.force)
+    push(args.target, args.pattern, args.force)
 
 
 if __name__ == '__main__':

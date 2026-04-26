@@ -16,7 +16,7 @@ from ._fixtures import (
 
 class OctatrackHelpersTest(unittest.TestCase):
     def setUp(self):
-        self.render = load_render_module('octatrack')
+        self.render = load_render_module('octatrack/ot-basic')
 
     def test_expand_cell_polymetric_stretch(self):
         # `{a b c d}%8` polymetric stretch: i*M//N where M=4, N=8 →
@@ -49,7 +49,7 @@ class OctatrackHelpersTest(unittest.TestCase):
 
 class OctatrackProbabilitySnapTest(unittest.TestCase):
     def setUp(self):
-        self.render = load_render_module('octatrack')
+        self.render = load_render_module('octatrack/ot-basic')
 
     def test_one_returns_none(self):
         # 1.0 means "always fires" — no condition set.
@@ -86,7 +86,7 @@ class OctatrackRoundtripTest(unittest.TestCase):
     EXPECTED_ACTIVE = [1, 3, 5, 9, 11, 13, 15]
 
     def _render(self, probability=1.0):
-        render = load_render_module('octatrack')
+        render = load_render_module('octatrack/ot-basic')
         wd = WorkDir().__enter__()
         try:
             paths = make_break_wavs(wd.samples, ['kk', 'sn'], bpm=120, steps=32)
@@ -161,7 +161,7 @@ class OctatrackRoundtripTest(unittest.TestCase):
             wd.__exit__(None, None, None)
 
     def test_invalid_probability_raises(self):
-        render = load_render_module('octatrack')
+        render = load_render_module('octatrack/ot-basic')
         with WorkDir() as wd:
             paths = make_break_wavs(wd.samples, ['kk'], bpm=120, steps=32)
             wd.stub_sources(paths)

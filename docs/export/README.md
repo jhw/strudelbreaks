@@ -6,8 +6,8 @@ several formats:
 
 | Doc | Target | Output | Source mode |
 |---|---|---|---|
-| [octatrack.md](octatrack.md) | `scripts/export/octatrack/` | OT project zip — one bank per row, one pattern per cell | `--source {json,wav}` |
-| [ot-doom.md](ot-doom.md) | `scripts/export/ot-doom/` | OT project zip — megabreak-of-doom matrix chains | `--source {json,wav}` |
+| [octatrack.md](octatrack.md) | `scripts/export/octatrack/ot-basic/` | OT project zip — one bank per row, one pattern per cell | `--source {json,wav}` |
+| [ot-doom.md](ot-doom.md) | `scripts/export/octatrack/ot-doom/` | OT project zip — megabreak-of-doom matrix chains | `--source {json,wav}` |
 | [torso-s4.md](torso-s4.md) | `scripts/export/torso-s4/` | Torso S-4 sample bundle — one WAV per row | `--source {json,wav}` |
 | [strudel.md](strudel.md) | `scripts/export/strudel/` | Standalone `.strudel.js` playback template | (n/a — WAV-only by construction) |
 

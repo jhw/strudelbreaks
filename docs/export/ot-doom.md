@@ -1,6 +1,6 @@
 # Octatrack "Megabreak of Doom" export — `ot-doom`
 
-Second Octatrack export target alongside `scripts/export/octatrack/`.
+Second Octatrack export target alongside `scripts/export/octatrack/ot-basic/`.
 Renders a tempera captures JSON into an OT project where the crossfader
 sweeps continuously between the cells of each row — different captured
 patterns become a single morphable timeline.
@@ -8,7 +8,7 @@ patterns become a single morphable timeline.
 CLI:
 
 ```
-python scripts/export/ot-doom/render.py <export.json>
+python scripts/export/octatrack/ot-doom/render.py <export.json>
     [--name NAME] [--seed N]
     [--source {json,wav}]
 ```
@@ -57,19 +57,27 @@ to a row is a one-click action in the captures UI.
 
 ## Layout
 
+Both Octatrack export targets live under `scripts/export/octatrack/`,
+sharing one set of push/clean scripts at the parent level:
+
 ```
-scripts/export/ot-doom/
-├── render.py          # main entry, build & zip a project
-├── audio.py           # pydub helpers: cell render + matrix chain
-├── push.py            # copied 1:1 from octatrack/, retargeted to tmp/ot-doom/
-├── clean_local.py     # copied 1:1
-├── clean_remote.py    # copied 1:1
-└── clean_stubs.py     # copied 1:1
+scripts/export/octatrack/
+├── push.py            # shared, takes target arg {ot-basic, ot-doom}
+├── clean_local.py     # shared, takes target arg
+├── clean_remote.py    # shared, no params
+├── clean_stubs.py     # shared, no params
+├── ot-basic/
+│   └── render.py
+└── ot-doom/
+    ├── render.py      # main entry, build & zip a project
+    └── audio.py       # pydub helpers: cell render + matrix chain
 ```
 
-`tmp/ot-doom/<name>.zip` is the build output. The push/clean scripts
-target the same `/Volumes/OCTATRACK/strudelbeats/` set as the
-existing target, so projects from both renderers coexist on the card.
+`tmp/ot-doom/<name>.zip` is the build output (sibling of
+`tmp/ot-basic/<name>.zip` for the per-cell-pattern target). The
+push/clean scripts target the same `/Volumes/OCTATRACK/strudelbeats/`
+set as the basic target, so projects from both renderers coexist on
+the card.
 
 ## Render contract
 

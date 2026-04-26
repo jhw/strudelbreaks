@@ -1,6 +1,6 @@
 # ot-doom: chain packing — considered, not adopted
 
-Notes on a slot-saving optimisation for `scripts/export/ot-doom/` that
+Notes on a slot-saving optimisation for `scripts/export/octatrack/ot-doom/` that
 looked attractive on paper but doesn't survive the OT's
 scene-is-part-scoped constraint. Kept here so the next person who
 reaches for it doesn't have to re-derive why it's a dead end.
