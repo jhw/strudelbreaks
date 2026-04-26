@@ -146,7 +146,7 @@ class TorsoS4RoundtripTest(unittest.TestCase):
 
     def test_output_wavs_are_at_s4_sample_rate(self):
         # Source breaks come from a mixed-rate gist; the renderer must
-        # ship at the S-4 ceiling (96 kHz) per TORSO-S4.md.
+        # ship at the S-4 ceiling (96 kHz) per docs/export/torso-s4.md.
         render = load_render_module('torso-s4')
         with WorkDir() as wd:
             paths = make_break_wavs(wd.samples, ['a'], bpm=120, steps=32)

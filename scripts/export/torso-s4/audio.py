@@ -15,7 +15,7 @@ boundaries, reintroduce a sub-perceptual envelope (≤ 0.5 ms) inside
 `render_cell` only.
 
 All rendered output ships at 96 kHz, the S-4's max-supported sample
-rate per the manual; see TORSO-S4.md for the rationale and tradeoffs.
+rate per the manual; see docs/export/torso-s4.md for the rationale and tradeoffs.
 Source breaks come from the strudel gist at mixed 44.1/48 kHz; we
 upsample on load so every chunk downstream is at one consistent rate.
 
@@ -28,17 +28,22 @@ total length of N concatenated events is therefore exactly
 from __future__ import annotations
 
 import pathlib
+import sys
 from typing import Dict, List, Optional
 
 from pydub import AudioSegment
 
+# Cross-subdir import: scripts/export/ on path so we can pull the
+# shared device-rate constant. Mirrors the trick render.py uses.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-# Torso S-4 native ceiling; everything we ship lands here. See
-# TORSO-S4.md for why we pin this rather than passing source rates
-# through. The S-4 will resample any input ≤ 96 kHz on its own, but
-# pinning here keeps the export reproducible regardless of which
-# source-break wavs the gist happens to host.
-S4_SAMPLE_RATE = 96000
+from common.devices import S4_SAMPLE_RATE  # noqa: E402
+
+# Torso S-4 native ceiling; everything we ship lands at S4_SAMPLE_RATE.
+# See docs/export/torso-s4.md for why we pin this rather than passing
+# source rates through. The S-4 will resample any input ≤ 96 kHz on
+# its own, but pinning here keeps the export reproducible regardless
+# of which source-break wavs the gist happens to host.
 
 
 def load_break(path: pathlib.Path) -> AudioSegment:

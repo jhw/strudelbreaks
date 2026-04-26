@@ -15,7 +15,7 @@ so input s plays in full grid-aligned.
 
 This differs from the forum-canonical megabreak (which crossfades
 between source breaks rather than between captured patterns). See
-docs/planning/ot-doom.md for the full design + comparison.
+docs/export/ot-doom.md for the full design + comparison.
 
 Usage:
     python scripts/export/ot-doom/render.py <path/to/export.json> [--name NAME] [--seed N]

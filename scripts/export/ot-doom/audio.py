@@ -1,7 +1,7 @@
 """Audio rendering for ot-doom: source break wavs → per-cell bar audio,
 then matrix chains across the cells of a row.
 
-See docs/planning/ot-doom.md for the design — short version: every cell
+See docs/export/ot-doom.md for the design — short version: every cell
 in a row renders to one bar of audio, then chain[k] is the k-th equal
 segment of every cell concatenated. The crossfader walks slice_index
 0..N-1 across all chains, which by construction picks "input k played
@@ -20,16 +20,22 @@ length.
 from __future__ import annotations
 
 import pathlib
+import sys
 from typing import Dict, List
 
 from pydub import AudioSegment
 
+# Cross-subdir import: scripts/export/ on path so we can pull the
+# shared device-rate constant. Mirrors the trick render.py uses.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-# Octatrack plays back assuming 44100 Hz; a 48 kHz source plays at
-# ~91.9% speed (= 44100/48000) and sounds "laggy". The strudel sample
-# gist mixes 44.1 and 48 kHz wavs, so we force-resample on load.
-# See OCTATRACK.md for the full constraint list.
-OT_SAMPLE_RATE = 44100
+from common.devices import OT_SAMPLE_RATE  # noqa: E402
+
+# Octatrack plays back assuming OT_SAMPLE_RATE (44100 Hz); a 48 kHz
+# source plays at ~91.9% speed (= 44100/48000) and sounds "laggy".
+# The strudel sample gist mixes 44.1 and 48 kHz wavs, so we
+# force-resample on load. See docs/export/octatrack.md for the full
+# constraint list.
 
 
 def load_break(path: pathlib.Path) -> AudioSegment:

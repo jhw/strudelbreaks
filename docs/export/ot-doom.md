@@ -1,9 +1,22 @@
 # Octatrack "Megabreak of Doom" export — `ot-doom`
 
-A second Octatrack export target alongside `scripts/export/octatrack/`.
+Second Octatrack export target alongside `scripts/export/octatrack/`.
 Renders a tempera captures JSON into an OT project where the crossfader
 sweeps continuously between the cells of each row — different captured
 patterns become a single morphable timeline.
+
+CLI:
+
+```
+python scripts/export/ot-doom/render.py <export.json>
+    [--name NAME] [--seed N]
+    [--source {json,wav}]
+```
+
+Output: `tmp/ot-doom/<name>.zip`. `--source` is the shared flag (see
+`docs/export/octatrack.md` for behaviour); JSON mode renders break
+audio at 44.1 kHz directly via beatwav, WAV mode bundles the gist's
+WAVs and resamples on load.
 
 ## Two readings of "Megabreak of Doom"
 
@@ -77,7 +90,7 @@ For each cell in the row, build an in-memory `AudioSegment` of one
 bar at the project tempo:
 
 1. Resolve per-event break names by polymetric stretch of the
-   captured `{a b c d}%N` form — see `STRUDEL.md` "Polymetric
+   captured `{a b c d}%N` form — see `STRUDEL.md` (repo root) "Polymetric
    stretch". For tempera's `events_per_cycle = 8` and a 4-name break
    that's `[a a b b a a b b]` (with index `i * 4 // 8`).
 2. For each event `i`:
@@ -187,7 +200,7 @@ ffmpeg dependency.
 Source wavs from the strudel sample gist mix 44.1 and 48 kHz. The OT
 expects 44.1 kHz at trig time — a 48 kHz file plays ~9% slow. `audio.py`
 resamples on load via `set_frame_rate(OT_SAMPLE_RATE)` so every chain
-ships at the native rate. See `OCTATRACK.md` for the full list of
+ships at the native rate. See `docs/export/octatrack.md` for the full list of
 device-side constraints.
 
 ## File layout in the project bundle
@@ -207,7 +220,7 @@ ot-doom-<name>.zip
 
 ## Implementation steps
 
-1. **Doc this design** in `docs/planning/ot-doom.md` (this file).
+1. **Doc this design** in `docs/export/ot-doom.md` (this file).
 2. **Rewrite `audio.py`**:
    - Keep `load_break`, `equal_slices`, `export_wav`.
    - Drop `render_timesliced_step` (not needed any more).
@@ -253,4 +266,6 @@ ot-doom-<name>.zip
   `40c8790` ("Use octapy 0.1.23 slice_index on scene tracks") — the
   prior art this rewrite tracks.
 - octapy: `AudioSceneTrack.slice_index` (≥ 0.1.23).
-- `STRUDEL.md` — polymetric stretch and the captures-side mini-notation.
+- `STRUDEL.md` (repo root) — Strudel transpile rules, polymetric stretch,
+  and the captures-side mini-notation. Useful when iterating on
+  `tempera.strudel.js`.

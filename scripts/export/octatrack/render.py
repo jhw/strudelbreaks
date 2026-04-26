@@ -38,12 +38,13 @@ from octapy import (
 
 from common import sample_source
 from common.cli import build_parser, require_file, resolve_name
+from common.devices import OT_SAMPLE_RATE
 from common.schema import load_export
 
-# Octatrack expects 44.1 kHz playback. JSON-source rendering hits this
-# rate up-front; WAV-source bundling lands the gist's mixed-rate WAVs
-# as-is — see OCTATRACK.md for the latent-bug discussion.
-OT_SAMPLE_RATE = 44100
+# Octatrack expects OT_SAMPLE_RATE (44.1 kHz) at trig time. JSON-source
+# rendering hits this rate up-front; WAV-source bundling lands the
+# gist's mixed-rate WAVs as-is — see docs/export/octatrack.md for the
+# latent-bug discussion.
 
 # Source break wavs are 32 steps (2 bars at 1/16). N_SLICES=16 cuts them
 # into 16 slices of 2 steps each, so a slice spans an 1/8 note plus the
@@ -172,7 +173,7 @@ def build_project(export_path, name, probability=1.0, source='json'):
     # rendered at OT_SAMPLE_RATE = 44.1 kHz up-front, so the OT plays
     # them back at the recorded rate. In WAV-source mode the gist's
     # mixed-rate WAVs (44.1 / 48 kHz) are bundled as-is — see
-    # OCTATRACK.md: a 48 kHz file plays at ~91.9% speed, but each trig
+    # docs/export/octatrack.md: a 48 kHz file plays at ~91.9% speed, but each trig
     # only fires for ~1/8 note before being replaced, so the drift is
     # latent rather than audible. JSON mode fixes it for free.
     flex_slots = {}

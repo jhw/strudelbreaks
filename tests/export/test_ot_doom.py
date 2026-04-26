@@ -5,7 +5,7 @@ the cells of the row as the doom inputs. Each cell renders to a bar of
 audio in Python; chain[k] = segment_k(input_0) ++ … ++ segment_k(input_{N-1}).
 N flex slots, N trigs at intervals of 16/N; scenes lock track 1's
 slice_index to 0 / N-1; no per-trig slice_index p-lock. See
-docs/planning/ot-doom.md for the full design.
+docs/export/ot-doom.md for the full design.
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ class OtDoomAudioHelpersTest(unittest.TestCase):
 
     def test_load_break_resamples_to_ot_native(self):
         # Source wav at 48 kHz; load_break must hand back a 44.1 kHz
-        # AudioSegment. See OCTATRACK.md for why this matters.
+        # AudioSegment. See docs/export/octatrack.md for why this matters.
         with WorkDir() as wd:
             wav = wd.samples / 'src48k.wav'
             with wave.open(str(wav), 'wb') as w:
@@ -175,7 +175,7 @@ class OtDoomRoundtripTest(unittest.TestCase):
             self.assertTrue(zip_path.exists())
 
             # Chain wavs land in the per-row render dir at 44.1 kHz —
-            # the resample-on-load contract from OCTATRACK.md.
+            # the resample-on-load contract from docs/export/octatrack.md.
             chain_wavs = sorted((wd.root / 'render' / 'OTDOOMRT' / 'bank01').glob('*.wav'))
             self.assertEqual(len(chain_wavs), 4)  # |C| = 4 chains
             for wav_path in chain_wavs:

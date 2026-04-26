@@ -193,7 +193,8 @@ npm test
 ```
 
 Python export targets — stdlib `unittest`, requires the `requirements.txt`
-deps installed in a venv (`octapy`, `pydub`):
+deps installed in a venv (`beatwav`, `octapy`, `pydub`). See
+`docs/export/` for per-target documentation:
 
 ```
 npm run test:py

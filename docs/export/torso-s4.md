@@ -1,8 +1,53 @@
-# Torso S-4 export quirks
+# Torso S-4 export
 
-Notes on what the device expects and the choices we make in the
-exporter to stay strict about it. Mirrors `OCTATRACK.md` /
-`STRUDEL.md` — relevant to anything under `scripts/export/torso-s4/`.
+Per-target notes for `scripts/export/torso-s4/`. Device-side
+constraints below; render-pipeline contract above.
+
+## What this target does
+
+One WAV per non-empty bank (= row). A row WAV is the audio
+concatenation of its cells; each cell renders the captured Strudel
+pattern (slice indices into the cell's break vocabulary,
+polymetric-stretched per `STRUDEL.md`). Output bundle:
+
+```
+tmp/torso-s4/<project>.zip
+└── <project>/
+    ├── <adj-noun-1>.wav   (row 1)
+    ├── <adj-noun-2>.wav   (row 2)
+    └── …
+```
+
+`push.py` extracts that into `/Volumes/S4/samples/strudelbeats/`,
+landing at `/Volumes/S4/samples/strudelbeats/<project>/<row>.wav` —
+the manual reserves `/samples/` for user-imported WAVs.
+
+CLI:
+
+```
+python scripts/export/torso-s4/render.py <export.json>
+    [--name NAME] [--seed N]
+    [--source {json,wav}]
+```
+
+The seed deterministically picks the project name and the per-row WAV
+names: same export + same seed → byte-identical bundle.
+
+## Source mode (`--source`)
+
+Default `json`. Controls how break audio is sourced from the gist:
+
+- **`json`** — fetch each break's beatwav pattern JSON, render to WAV
+  at the captures' BPM and 96 kHz via `beatwav.AudioRenderer`. The
+  renderer hits the device's target rate up-front, so no
+  `set_frame_rate` upsampling is needed on load.
+- **`wav`** — bundle the gist's WAVs as-is (44.1 / 48 kHz mixed).
+  `load_break` upsamples to 96 kHz so every chunk downstream sits at
+  the same rate.
+
+JSON mode falls back per-break to WAV when the gist has no
+`{name}.json`, with a warning. See
+`scripts/export/common/sample_source.py` for the shared abstraction.
 
 ## Sample rate: 96 kHz, always
 
@@ -10,7 +55,7 @@ The S-4 manual states that imported WAVs are auto-resampled, with a
 maximum supported source rate of 96 kHz. Any input ≤ 96 kHz is kept
 on-device at its source rate; anything above is downsampled.
 
-The strudel sample gist hosts breaks at mixed 44.1 / 48 kHz, so the
+The strudel sample gist hosts breaks at mixed 44.1 / 48 kHz, so a
 naive renderer would emit per-row WAVs at whatever rate happened to
 be hit first by `pydub.AudioSegment.from_wav`. That makes the export
 non-reproducible and bound to whichever break was sampled first.
@@ -26,14 +71,14 @@ reasons:
    sample rate gives that fade better resolution at the boundary
    sample. Cheap insurance for future work.
 
-The cost is upsampling 44.1 / 48 kHz sources to 96 kHz, which adds no
-information but doesn't lose any either. pydub's `set_frame_rate` uses
-`audioop.ratecv` (linear interpolation) — adequate for breakbeats.
+The cost is upsampling 44.1 / 48 kHz sources to 96 kHz (WAV-source
+mode) or rendering at 96 kHz directly (JSON-source mode). Either way
+the device sees one consistent rate.
 
 Implemented in `scripts/export/torso-s4/audio.py` via
-`load_break(...).set_frame_rate(S4_SAMPLE_RATE)`. See `OCTATRACK.md`
-for the contrasting OT case (44.1 kHz pin, with audible
-9% slowdown if violated).
+`load_break(...).set_frame_rate(S4_SAMPLE_RATE)`. See
+`docs/export/octatrack.md` for the contrasting OT case (44.1 kHz pin,
+with audible 9% slowdown if violated).
 
 ## Event timing: cumulative rounding, not per-event truncation
 
