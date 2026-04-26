@@ -23,16 +23,11 @@ length.
 from __future__ import annotations
 
 import pathlib
-import sys
 from typing import Dict, List
 
 from pydub import AudioSegment
 
-# Cross-subdir import: scripts/export/ on path so we can pull the
-# shared device-rate constant. Mirrors the trick render.py uses.
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent))
-
-from common.devices import OT_SAMPLE_RATE  # noqa: E402
+from app.export.common.devices import OT_SAMPLE_RATE
 
 # Octatrack plays back assuming OT_SAMPLE_RATE (44100 Hz); a 48 kHz
 # source plays at ~91.9% speed (= 44100/48000) and sounds "laggy".

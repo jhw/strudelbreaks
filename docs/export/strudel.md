@@ -1,6 +1,6 @@
 # Strudel playback-template export
 
-Per-target notes for `scripts/export/strudel/`. Unlike the three audio
+Per-target notes for `app/export/strudel/`. Unlike the three audio
 targets (`octatrack`, `ot-doom`, `torso-s4`), this one renders no
 audio. It generates a standalone `.strudel.js` file that loads the
 sample gist at runtime via `samples(gistUrl)` and plays back the
@@ -9,14 +9,10 @@ contract as `tempera.strudel.js` at the repo root, just with the
 breaks/patterns from the export baked in as literal mini-notation
 strings.
 
-CLI:
-
-```
-python scripts/export/strudel/render.py <export.json>
-    [--name NAME] [--seed N]
-```
-
-Output: `tmp/strudel/<name>.strudel.js`. Paste the file into
+Invocation: tempera's `export ▾` menu → `strudel`. Posts the captures
+payload to `POST /api/export/text` (`target='strudel'`); the server
+calls `app.export.strudel.render.render()` and streams the rendered
+`.strudel.js` back. Paste the downloaded file into
 [Strudel](https://strudel.cc/) to play.
 
 There is **no `--source` flag** here. The generated template is
@@ -69,5 +65,5 @@ for sharing a finished arrangement as a single `.strudel.js` paste.
   template mirrors.
 - `STRUDEL.md` (repo root) — Strudel transpile rules and runtime quirks
   relevant when editing either template.
-- `scripts/export/strudel/templates/playback.strudel.js.j2` — the
+- `app/export/strudel/templates/playback.strudel.js.j2` — the
   Jinja2 template the renderer fills in.

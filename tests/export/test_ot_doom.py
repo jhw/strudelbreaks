@@ -16,15 +16,12 @@ design.
 """
 from __future__ import annotations
 
-import importlib.util
-import sys
 import unittest
 import wave
 
 from octapy import FX1Type, FX2Type, Project
 
 from ._fixtures import (
-    EXPORT_ROOT,
     WorkDir,
     load_render_module,
     make_capture_cell,
@@ -37,21 +34,9 @@ TRACKS = ('kick', 'snare', 'hat')
 
 
 def _load_audio_module():
-    """Load `scripts/export/octatrack/ot-doom/audio.py` as a fresh module
-    so tests don't share monkey-patch state with the renderer's own
-    import."""
-    target_dir = EXPORT_ROOT / 'octatrack' / 'ot-doom'
-    audio_path = target_dir / 'audio.py'
-    for path in (str(EXPORT_ROOT), str(target_dir)):
-        if path not in sys.path:
-            sys.path.insert(0, path)
-    mod_name = '_test_audio_ot_doom'
-    if mod_name in sys.modules:
-        del sys.modules[mod_name]
-    spec = importlib.util.spec_from_file_location(mod_name, audio_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    """Import the ot-doom audio module."""
+    from app.export.octatrack.ot_doom import audio
+    return audio
 
 
 def _make_cells(n_cells):

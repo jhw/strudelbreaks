@@ -1,20 +1,14 @@
 """Shared fixtures for the export-target test suite.
 
-Each renderer is reachable from `<repo>/scripts/export/<target>/render.py`,
-where `<target>` is one of `octatrack/ot-basic`, `octatrack/ot-doom`,
-`torso-s4`, or `strudel`. Hyphenated dir names can't be imported as
-packages, so `load_render_module` goes through importlib.util directly:
-it injects `scripts/export` and the target's own directory into
-`sys.path` so that `import render` (and the target's sibling `audio.py`,
-when present) work.
-
-The renderers all do remote work in production (fetch a sample manifest
-from a gist, download wavs). Tests stub those out. We synthesise tiny
-sine wavs locally and stand up a manifest pointing at them.
+Each renderer is reachable as a normal package under `app.export.<target>`
+(`octatrack.ot_basic`, `octatrack.ot_doom`, `strudel`, `torso_s4`). The
+sample-source layer is stubbed per-test so nothing reaches the gist or
+S3; we synthesise tiny sine wavs locally and the stub hands those back
+to `resolve_break_paths`.
 """
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import math
 import pathlib
@@ -25,44 +19,22 @@ import wave
 from typing import Dict, List, Optional
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-EXPORT_ROOT = REPO_ROOT / 'scripts' / 'export'
-
 SAMPLE_RATE = 44100
 
 
 def load_render_module(target: str):
-    """Load `scripts/export/<target>/render.py` as a fresh module each
-    call so tests don't share monkey-patch state.
+    """Import `app.export.<target>.render`. The legacy slash-and-hyphen
+    form (`octatrack/ot-basic`, `torso-s4`) is accepted and translated
+    so callers don't have to know the on-disk Python package layout.
 
-    Targets containing a hyphen (`ot-doom`, `torso-s4`) can't be
-    imported as packages, so we go through importlib.util directly.
-    We prepend `scripts/export` to sys.path so the renderer's own
-    `from common.cli import ...` resolves, and we put the target's
-    own dir at the *front* of sys.path before each load so its sibling
-    `audio` module wins over any cached one from a previous target —
-    several targets ship their own audio.py, and Python's import cache
-    would otherwise hand back whichever one loaded first.
+    Tests monkey-patch module-level constants like `OUTPUT_DIR` /
+    `RENDER_DIR` on the returned module. `import_module` returns the
+    cached module, so monkey-patches set in one test stick around — but
+    every test resets the constants before use, so the cached state is
+    harmless.
     """
-    target_dir = EXPORT_ROOT / target
-    render_path = target_dir / 'render.py'
-    if str(EXPORT_ROOT) not in sys.path:
-        sys.path.insert(0, str(EXPORT_ROOT))
-    target_path = str(target_dir)
-    while target_path in sys.path:
-        sys.path.remove(target_path)
-    sys.path.insert(0, target_path)
-    # Evict any cached sibling modules — each target ships its own
-    # audio.py, and we don't want the previous target's version to
-    # bleed into this load.
-    for cached in ('audio',):
-        sys.modules.pop(cached, None)
-    mod_name = f'_test_render_{target.replace("-", "_").replace("/", "_")}'
-    sys.modules.pop(mod_name, None)
-    spec = importlib.util.spec_from_file_location(mod_name, render_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    parts = [p.replace('-', '_') for p in target.split('/')]
+    return importlib.import_module('.'.join(['app.export', *parts, 'render']))
 
 
 def write_sine_wav(path: pathlib.Path, freq: float, duration_s: float) -> None:
@@ -182,9 +154,7 @@ def stub_sample_source(name_to_path):
     from a `finally` (or use `WorkDir.stub_sources`, which wires
     teardown into the WorkDir's exit).
     """
-    if str(EXPORT_ROOT) not in sys.path:
-        sys.path.insert(0, str(EXPORT_ROOT))
-    from common import sample_source
+    from app.export.common import sample_source
 
     original = sample_source.resolve_break_paths
 

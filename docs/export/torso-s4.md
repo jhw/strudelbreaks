@@ -1,6 +1,6 @@
 # Torso S-4 export
 
-Per-target notes for `scripts/export/torso-s4/`. Device-side
+Per-target notes for `app/export/torso_s4/`. Device-side
 constraints below; render-pipeline contract above.
 
 ## What this target does
@@ -11,29 +11,27 @@ pattern (slice indices into the cell's break vocabulary,
 polymetric-stretched per `STRUDEL.md`). Output bundle:
 
 ```
-tmp/torso-s4/<project>.zip
+~/Downloads/<project>.s4.zip
 └── <project>/
     ├── <adj-noun-1>.wav   (row 1)
     ├── <adj-noun-2>.wav   (row 2)
     └── …
 ```
 
-`push.py` extracts that into `/Volumes/S4/samples/strudelbeats/`,
-landing at `/Volumes/S4/samples/strudelbeats/<project>/<row>.wav` —
-the manual reserves `/samples/` for user-imported WAVs.
+`scripts/torso-s4/push.py` extracts that into
+`/Volumes/S4/samples/strudelbeats/`, landing at
+`/Volumes/S4/samples/strudelbeats/<project>/<row>.wav` — the manual
+reserves `/samples/` for user-imported WAVs.
 
-CLI:
+Invocation: tempera's `export ▾` menu → `torso-s4`. Posts the captures
+payload to `POST /api/export/binary` (`target='torso-s4'`); the server
+calls `app.export.torso_s4.render.render()` and streams the project
+zip back. Browser saves to `~/Downloads/<name>.s4.zip`.
 
-```
-python scripts/export/torso-s4/render.py <export.json>
-    [--name NAME] [--seed N]
-    [--source {json,wav}]
-```
+The `seed` field in the request body (optional) deterministically picks
+the per-row WAV names: same payload + same seed → byte-identical bundle.
 
-The seed deterministically picks the project name and the per-row WAV
-names: same export + same seed → byte-identical bundle.
-
-## Source mode (`--source`)
+## Source mode (`source` field)
 
 Default `json`. Controls how break audio is sourced from the gist:
 
@@ -47,7 +45,7 @@ Default `json`. Controls how break audio is sourced from the gist:
 
 JSON mode falls back per-break to WAV when the gist has no
 `{name}.json`, with a warning. See
-`scripts/export/common/sample_source.py` for the shared abstraction.
+`app/export/common/sample_source.py` for the shared abstraction.
 
 ## Sample rate: 96 kHz, always
 
@@ -75,7 +73,7 @@ The cost is upsampling 44.1 / 48 kHz sources to 96 kHz (WAV-source
 mode) or rendering at 96 kHz directly (JSON-source mode). Either way
 the device sees one consistent rate.
 
-Implemented in `scripts/export/torso-s4/audio.py` via
+Implemented in `app/export/torso_s4/audio.py` via
 `load_break(...).set_frame_rate(S4_SAMPLE_RATE)`. See
 `docs/export/octatrack.md` for the contrasting OT case (44.1 kHz pin,
 with audible 9% slowdown if violated).
@@ -117,6 +115,6 @@ where the captured BPM doesn't divide cleanly.
   source is stereo, no code change needed.
 - **Sample-bundle layout**: the manual reserves `/samples/` for
   user-imported WAVs (factory content lives in `/FACTORY/`, hidden
-  from MSD). `push.py` extracts under
+  from MSD). `scripts/torso-s4/push.py` extracts under
   `/Volumes/S4/samples/strudelbeats/<project>/<row>.wav` so wholesale
   backup or wipe is one folder operation.

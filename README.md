@@ -49,7 +49,7 @@ window.StrudelBreaks = {
   mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
   util:  { meanIndex, thinByUniforms },
   hex:   { hex2, hexPad, arrayHex },
-  ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createSliderRow, createSliderPanel, resetUI },
+  ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createSliderRow, createSliderPanel, createActionMenu, resetUI },
   store: { createPersistedStore, downloadBlob },
 };
 ```
@@ -152,6 +152,15 @@ at the edge (for Strudel's `mini()` / `fmap(mini).innerJoin()` dance).
   `createCornerPanel` — useful for stacking the slider panel above or
   below another corner-anchored block. Thin convenience over
   `createCornerPanel` + repeated `createSliderRow`.
+- `createActionMenu({ anchor, items, onClose? })` →
+  `{ element, close }`. Pop-up dropdown anchored under `anchor` (a
+  trigger element); `items` is an array of `{ label, onSelect }`,
+  appended in order as full-width buttons. Outside-click dismisses
+  (the dismiss listener is registered on the next tick so the same
+  click that opened the menu doesn't immediately close it). `close()`
+  is idempotent. Caller owns the toggle gesture and should
+  `event.stopPropagation()` on the trigger so a re-click doesn't
+  reopen the menu after the outside-click listener closes it.
 - `resetUI()` — removes every DOM node the library has attached.
   Templates should call this once after loading StrudelBreaks so
   widgets from a previously-pasted script don't linger. Every element
@@ -187,20 +196,76 @@ no version pinning.
 ## Export targets
 
 Tempera (`tempera.strudel.js`) persists captures to `localStorage` and
-exports them as a JSON payload. `scripts/export/` turns that payload
-into device-specific formats:
+exposes a per-format export menu. Selecting a format POSTs the
+in-memory payload to the local FastAPI server in `app/`, which renders
+the artifact via the modules in `app/export/` and streams it back
+as a download. The browser saves it to `~/Downloads/`; per-device
+push scripts copy from there onto the device.
 
-| Target | Output | Doc |
+| Target | Filename | Doc |
 |---|---|---|
-| `octatrack/ot-basic/` | OT project zip — per-cell patterns, per-track stems on T1-T3 | [docs/export/octatrack.md](docs/export/octatrack.md) |
-| `octatrack/ot-doom/` | OT project zip — megabreak-of-doom matrix chains, per-track stems on T1-T3 | [docs/export/ot-doom.md](docs/export/ot-doom.md) |
-| `torso-s4/` | Torso S-4 sample bundle — one mixed WAV per row | [docs/export/torso-s4.md](docs/export/torso-s4.md) |
-| `strudel/` | Standalone `.strudel.js` playback template | [docs/export/strudel.md](docs/export/strudel.md) |
+| `ot-basic` | `<adj>-<noun>.ot.zip` — OT project zip, per-cell patterns, per-track stems on T1-T3 | [docs/export/octatrack.md](docs/export/octatrack.md) |
+| `ot-doom` | `<adj>-<noun>.ot.zip` — OT project zip, megabreak-of-doom matrix chains, per-track stems on T1-T3 | [docs/export/ot-doom.md](docs/export/ot-doom.md) |
+| `torso-s4` | `<adj>-<noun>.s4.zip` — Torso S-4 sample bundle, one mixed WAV per row | [docs/export/torso-s4.md](docs/export/torso-s4.md) |
+| `strudel` | `<adj>-<noun>.strudel.js` — standalone playback template | [docs/export/strudel.md](docs/export/strudel.md) |
+| `json` | `tempera-captures-<gistId>-<stamp>.json` — raw payload, browser-side download (no server) | — |
 
-Common shape:
+Both OT variants land at `.ot.zip` — the device-side tooling treats
+them identically once they're zips, so push/clean don't need to know
+which renderer produced a given file.
+
+### Server
+
+```bash
+# 1. Install deps in a venv
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Start the server (localhost:8000)
+./scripts/run.sh
+```
+
+The export menu in tempera POSTs to `http://127.0.0.1:8000`. Chrome
+treats `http://localhost` / `127.0.0.1` as a secure context exempt
+from mixed-content blocking, so the HTTPS strudel.cc page can fetch
+the local server with no flags. CORS is opened wide; nothing
+authenticated lives behind the loopback address.
+
+Endpoints:
 
 ```
-python scripts/export/<target>/render.py <export.json> [--name NAME] [--seed N]
+POST /api/export/text    { target: 'strudel',
+                           payload, name?, seed? }
+POST /api/export/binary  { target: 'ot-basic'|'ot-doom'|'torso-s4',
+                           payload, name?, seed?,
+                           probability? (ot-basic),
+                           source? (torso-s4: 'json'|'wav') }
+```
+
+Response is the artifact bytes/text; the filename lives in
+`Content-Disposition`. The server uses a fresh `tempfile.TemporaryDirectory()`
+per request so nothing accumulates locally — the browser's `~/Downloads/`
+is the only persistent output location.
+
+### Device tooling (`tools/`)
+
+Each target's tooling lives at `tools/<device>/`. Push iterates
+`~/Downloads/<adj>-<noun>.<ext>` (strict adj-noun guard so unrelated
+files in Downloads can't be picked up), reads the project name from
+each zip, skips ones already on the device, and asks per-project
+whether to extract. `clean_local.py` is the symmetric local cleanup.
+
+```
+tools/octatrack/push.py          # ~/Downloads/*.ot.zip       → /Volumes/OCTATRACK/strudelbeats/
+tools/octatrack/clean_local.py   # ~/Downloads/*.ot.zip       (remove)
+tools/octatrack/clean_remote.py  # /Volumes/OCTATRACK/strudelbeats/<project>/  (remove)
+tools/octatrack/clean_stubs.py   # /Volumes/OCTATRACK/strudelbeats/<dangling>/ (remove)
+
+tools/torso-s4/push.py           # ~/Downloads/*.s4.zip       → /Volumes/S4/samples/strudelbeats/
+tools/torso-s4/clean_local.py    # ~/Downloads/*.s4.zip       (remove)
+tools/torso-s4/clean_remote.py   # /Volumes/S4/samples/strudelbeats/<project>/ (remove)
+
+tools/strudel/clean_local.py     # ~/Downloads/*.strudel.js   (remove; no push — paste into strudel.cc)
 ```
 
 ### Source rendering
@@ -223,16 +288,16 @@ bucket (`s3://wol-samplebank/samples/`) and mirrors them to
 `tmp/oneshots/` on first use via `aws s3 sync` — needs AWS
 credentials with read on the bucket. The shared resolver, cache
 layout, and fallback rules live in
-`scripts/export/common/sample_source.py`. Per-device sample rates
-live in `scripts/export/common/devices.py`.
+`app/export/common/sample_source.py`. Per-device sample rates
+live in `app/export/common/devices.py`.
 
-The `torso-s4/` target keeps a `--source {json,wav}` flag (default
-`json`) for the mixed-stem rendering it needs.
+The `torso-s4/` target keeps a `source` field (`'json'` or `'wav'`,
+default `'json'`) on the binary export request body for the mixed-stem
+rendering it needs.
 
 The `strudel/` target is a JS template generator, not an audio
-renderer — no `--source` flag. The generated `.strudel.js` loads
-WAVs at runtime via `samples(gistUrl)`, exactly like
-`tempera.strudel.js`.
+renderer. The generated `.strudel.js` loads WAVs at runtime via
+`samples(gistUrl)`, exactly like `tempera.strudel.js`.
 
 ## Tests
 

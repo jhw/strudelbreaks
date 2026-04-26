@@ -1,6 +1,6 @@
 # Octatrack export
 
-Per-target notes for `scripts/export/octatrack/ot-basic/` (per-cell-pattern
+Per-target notes for `app/export/octatrack/ot_basic/` (per-cell-pattern
 target, per-track stems). Device-side constraints are also referenced
 from `docs/export/ot-doom.md`.
 
@@ -14,20 +14,15 @@ to the captured slice index. OT pattern looping plays subsequent
 cycles. Source breaks are loaded into 16-slice flex slots once per
 project, **three slots per break** (kick, snare, hat).
 
-CLI:
+Invocation: tempera's `export ▾` menu → `ot-basic`. Posts the captures
+payload to `POST /api/export/binary` (`target='ot-basic'`); the server
+calls `app.export.octatrack.ot_basic.render.render()` and streams the
+project zip back. Browser saves to `~/Downloads/<name>.ot-basic.zip`.
 
-```
-python scripts/export/octatrack/ot-basic/render.py <export.json>
-    [--name NAME] [--seed N]
-    [--probability 0..1]
-```
-
-Output: `tmp/ot-basic/<name>.zip`.
-
-`--probability` (default 1.0 = always fires) snaps to the nearest
-Octatrack `TrigCondition.PERCENT_*` bucket and applies it to every
-captured trig on every track. See `scripts/export/octatrack/ot-basic/render.py`
-for the bucket list.
+`probability` (request-body field; default 1.0 = always fires) snaps
+to the nearest Octatrack `TrigCondition.PERCENT_*` bucket and applies
+it to every captured trig on every track. See
+`app/export/octatrack/ot_basic/render.py` for the bucket list.
 
 ## Per-track stems
 

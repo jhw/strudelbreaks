@@ -10,29 +10,25 @@ Two sliders drive playback: `rowSlider` selects a bank, `cellSlider`
 selects a cell within the bank. The cell slider is sized on the longest
 row; shorter rows wrap by cell-index modulo their source length.
 
-Usage:
-    python scripts/export/strudel/render.py <path/to/export.json>
+Imported and called by the FastAPI server (`app/exporters.py`) — no CLI;
+the server writes the captures payload to a temp file and points
+`output_dir` at a temp dir.
 
 Output:
-    tmp/strudel/<basename>.strudel.js
+    <output_dir>/<name>.strudel.js   (defaults to tmp/strudel/)
 """
 from __future__ import annotations
 
 import pathlib
 import sys
 
-# Cross-subdir imports: add scripts/export/ to sys.path so common/ is
-# reachable regardless of the cwd the script is invoked from.
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
-
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-from common.cli import build_parser, require_file, resolve_name
-from common.schema import load_export
+from app.export.common.schema import load_export
 
-SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent.parent.parent
-TEMPLATE_DIR = SCRIPT_DIR / 'templates'
+PACKAGE_DIR = pathlib.Path(__file__).resolve().parent
+REPO_ROOT = PACKAGE_DIR.parents[3]
+TEMPLATE_DIR = PACKAGE_DIR / 'templates'
 OUTPUT_DIR = REPO_ROOT / 'tmp' / 'strudel'
 
 REQUIRED_CTX = (
@@ -116,7 +112,7 @@ def format_idx_js(rows, field):
     return '\n'.join(lines)
 
 
-def render(export_path, name):
+def render(export_path, name, *, output_dir=None):
     payload, ctx = load_export(export_path, REQUIRED_CTX)
     rows, max_row_len = build_rows(payload.get('banks') or [], ctx['eventsPerCycle'])
 
@@ -142,18 +138,8 @@ def render(export_path, name):
         pattern_idx_js=format_idx_js(rows, 'pattern_idx'),
     )
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUTPUT_DIR / f'{name}.strudel.js'
+    out_dir = pathlib.Path(output_dir) if output_dir is not None else OUTPUT_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f'{name}.strudel.js'
     out_path.write_text(rendered)
     return out_path
-
-
-def main():
-    args = build_parser(__doc__.splitlines()[0]).parse_args()
-    require_file(args.export)
-    out = render(args.export, resolve_name(args))
-    print(out)
-
-
-if __name__ == '__main__':
-    main()

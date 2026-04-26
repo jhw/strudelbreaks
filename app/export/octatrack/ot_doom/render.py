@@ -40,18 +40,19 @@ This differs from the forum-canonical megabreak (which crossfades
 between source breaks rather than between captured patterns). See
 docs/export/ot-doom.md for the full design + comparison.
 
-Usage:
-    python scripts/export/octatrack/ot-doom/render.py <path/to/export.json> [--name NAME] [--seed N]
+Imported and called by the FastAPI server (`app/exporters.py`) — no CLI;
+the server writes the captures payload to a temp file and points
+`output_dir` / `render_dir` at a temp dir.
 
 Output:
-    tmp/ot-doom/<name>.zip
+    <output_dir>/<name>.zip       (defaults to tmp/ot-doom/)
+    <render_dir>/<name>/...       intermediate per-bank chain WAVs
+                                  (defaults to tmp/ot-doom-render/)
 """
 from __future__ import annotations
 
 import pathlib
 import sys
-
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent))
 
 from octapy import (
     FX1Type,
@@ -60,11 +61,10 @@ from octapy import (
     SliceMode,
 )
 
-from common import sample_source
-from common.cli import build_parser, require_file, resolve_name
-from common.schema import load_export
+from app.export.common import sample_source
+from app.export.common.schema import load_export
 
-from audio import (
+from .audio import (
     OT_SAMPLE_RATE,
     build_matrix_chain,
     equal_slices,
@@ -81,7 +81,7 @@ TRACKS = ('kick', 'snare', 'hat')
 
 # Source break wavs are 32 steps (2 bars at 1/16). N_SLICES=16 cuts them
 # into 16 slices of 2 steps each — same scheme as the existing octatrack
-# target. See scripts/export/octatrack/ot-basic/render.py for the ghost-beat
+# target. See app/export/octatrack/ot_basic/render.py for the ghost-beat
 # rationale.
 N_SLICES = 16
 N_PATTERN_STEPS = 16          # 1 bar at 1/16 — one Strudel cycle.
@@ -97,8 +97,7 @@ FLEX_SLOT_LIMIT = 128         # OT project-wide flex pool.
 # exposes .send.
 T8_FX_LEVEL = 64
 
-SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent.parent.parent.parent
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 OUTPUT_DIR = REPO_ROOT / 'tmp' / 'ot-doom'
 RENDER_DIR = REPO_ROOT / 'tmp' / 'ot-doom-render'
 
@@ -313,7 +312,7 @@ def render_bank(
         _configure_pattern(bank, pattern_idx + 1, slots, n)
 
 
-def build_project(export_path, name):
+def build_project(export_path, name, *, render_dir=None):
     payload, ctx = load_export(export_path, REQUIRED_CTX)
     if ctx['nSlices'] != N_SLICES:
         sys.exit(f'nSlices {ctx["nSlices"]} != {N_SLICES} (ot-doom assumes 16)')
@@ -369,7 +368,8 @@ def build_project(export_path, name):
     # (break, stem) without changing the function signature.
     source_slice_cache = {'__paths__': stem_paths}
 
-    row_render_root = RENDER_DIR / name
+    render_root = pathlib.Path(render_dir) if render_dir is not None else RENDER_DIR
+    row_render_root = render_root / name
     if row_render_root.exists():
         for p in row_render_root.rglob('*'):
             if p.is_file():
@@ -392,21 +392,10 @@ def build_project(export_path, name):
     return project
 
 
-def render(export_path, name):
-    project = build_project(export_path, name)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    zip_path = OUTPUT_DIR / f'{name}.zip'
+def render(export_path, name, *, output_dir=None, render_dir=None):
+    project = build_project(export_path, name, render_dir=render_dir)
+    out_dir = pathlib.Path(output_dir) if output_dir is not None else OUTPUT_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = out_dir / f'{name}.zip'
     project.to_zip(zip_path)
     return zip_path
-
-
-def main():
-    parser = build_parser(__doc__.splitlines()[0])
-    args = parser.parse_args()
-    require_file(args.export)
-    out = render(args.export, resolve_name(args))
-    print(out)
-
-
-if __name__ == '__main__':
-    main()

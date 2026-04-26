@@ -416,6 +416,68 @@
     };
   }
 
+  // Pop-up action menu anchored to a trigger element. Returns
+  // `{ element, close }`; the menu is appended to document.body and
+  // dismisses itself when the user clicks outside it (the dismiss
+  // listener is registered on the next tick so the same click that
+  // opened the menu doesn't immediately close it). `items` is an array
+  // of `{ label, onSelect }`; clicking one runs onSelect then closes.
+  // `onClose` (optional) fires once when the menu goes away.
+  //
+  // Caller is responsible for the open/toggle gesture; typically:
+  //
+  //     let menu = null;
+  //     btn.addEventListener('click', e => {
+  //       e.stopPropagation();           // outside-click handler ignores
+  //       if (menu) { menu.close(); return; }
+  //       menu = createActionMenu({
+  //         anchor: btn, items: [...],
+  //         onClose: () => { menu = null; },
+  //       });
+  //     });
+  //
+  // The stopPropagation matters: without it, the document-level
+  // outside-click listener fires on the toggle's own re-click and
+  // re-opens the menu after closeMenu cleared it.
+  function createActionMenu({ anchor, items, onClose }) {
+    if (!anchor) throw new Error('[strudelbreaks] createActionMenu needs anchor');
+    if (!items || !items.length) throw new Error('[strudelbreaks] createActionMenu needs items');
+
+    const menu = document.createElement('div');
+    menu.dataset.strudelbreaks = '1';
+    menu.dataset.role = 'action-menu';
+
+    const r = anchor.getBoundingClientRect();
+    menu.style.cssText =
+      'position:fixed;top:' + (r.bottom + 4) + 'px;'
+      + 'right:' + (window.innerWidth - r.right) + 'px;'
+      + 'background:#0a0a0a;border:1px solid #1f3f1f;padding:6px;z-index:9999;'
+      + 'display:flex;flex-direction:column;gap:4px;';
+
+    let closed = false;
+    function close() {
+      if (closed) return;
+      closed = true;
+      menu.remove();
+      document.removeEventListener('click', onOutsideClick);
+      if (onClose) onClose();
+    }
+
+    function onOutsideClick(e) {
+      if (!menu.contains(e.target)) close();
+    }
+
+    for (const item of items) {
+      const btn = createButton(item.label, () => { close(); item.onSelect(); },
+        { style: 'min-width:140px;text-align:left' });
+      menu.appendChild(btn);
+    }
+
+    document.body.appendChild(menu);
+    setTimeout(() => document.addEventListener('click', onOutsideClick), 0);
+    return { element: menu, close };
+  }
+
   // Remove every DOM node the library has ever attached. Templates
   // should call this once after loading StrudelBreaks, before building
   // fresh widgets — otherwise panels from a previously-loaded template
@@ -499,7 +561,7 @@
     mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
     util:  { meanIndex, thinByUniforms },
     hex:   { hex2, hexPad, arrayHex },
-    ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createSliderRow, createSliderPanel, resetUI },
+    ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createSliderRow, createSliderPanel, createActionMenu, resetUI },
     store: { createPersistedStore, downloadBlob },
   };
 });

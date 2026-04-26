@@ -1,36 +1,47 @@
 #!/usr/bin/env python
-"""Push torso-s4 project zips to the S-4 over USB mass storage.
+"""Push OT project zips to the Octatrack CF card under the strudelbeats set.
 
-Extracts .zip files from tmp/torso-s4/ into
-/Volumes/S4/samples/strudelbeats/. The S-4's `/samples/` is the
-manual-defined location for user-imported wavs (factory content
-lives in `/FACTORY/` and isn't visible in MSD mode); we keep all
-strudelbreaks output corralled under a single `strudelbeats/`
-subfolder there so it's easy to back up or wipe as a unit.
+Source zips live in `~/Downloads/<adjective>-<noun>.ot.zip` — the
+filename the strudelbreaks server hands the browser. The two render
+variants (ot-basic, ot-doom) both emit `.ot.zip`; on-device they're
+just project directories, so push doesn't need to distinguish.
+
+Iterates Downloads, lists every `<adj>-<noun>.ot.zip` whose project
+name (read from the .work entry inside the zip) is **not** already a
+directory under `/Volumes/OCTATRACK/strudelbeats/`, and asks once per
+project whether to extract.
 
 Usage:
     push.py              # list all, ask per project
     push.py pattern      # filter by name fragment
-    push.py -f           # copy all without prompting (skip existing)
+    push.py -f           # copy all without prompting
     push.py -f pattern   # copy matching without prompting
 """
 
 import argparse
 import pathlib
+import re
 import sys
 import zipfile
 
-SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent.parent.parent
-SOURCE_DIR = REPO_ROOT / 'tmp' / 'torso-s4'
-S4_DEVICE = pathlib.Path('/Volumes/S4')
-S4_SET = S4_DEVICE / 'samples' / 'strudelbeats'
+DOWNLOADS = pathlib.Path.home() / 'Downloads'
+SUFFIX = '.ot.zip'
+# Strict adj-noun guard so unrelated `.ot.zip` files (e.g. ones the
+# user generated with `--name MYPROJECT`) don't get auto-pushed
+# alongside the seeded ones. Custom-named exports stay manual.
+NAME_PATTERN = re.compile(r'^[a-z]+-[a-z]+\.ot\.zip$')
+
+OT_DEVICE = pathlib.Path('/Volumes/OCTATRACK')
+OT_SET = OT_DEVICE / 'strudelbeats'
 
 
 def find_projects(pattern=None):
-    if not SOURCE_DIR.exists():
+    if not DOWNLOADS.exists():
         return []
-    projects = list(SOURCE_DIR.glob('*.zip'))
+    projects = [
+        p for p in DOWNLOADS.iterdir()
+        if p.is_file() and NAME_PATTERN.match(p.name)
+    ]
     if pattern:
         pl = pattern.lower()
         projects = [p for p in projects if pl in p.name.lower()]
@@ -40,17 +51,16 @@ def find_projects(pattern=None):
 def project_name_from_zip(zip_path):
     with zipfile.ZipFile(zip_path, 'r') as zf:
         for name in zf.namelist():
-            head = name.split('/', 1)[0]
-            if head:
-                return head
-    return zip_path.stem
+            if name.endswith('.work'):
+                return name.split('/')[0]
+    return zip_path.name[:-len(SUFFIX)].upper()
 
 
-def exists_on_s4(project_name):
-    if not S4_SET.exists():
+def exists_on_ot(project_name):
+    if not OT_SET.exists():
         return False
     pl = project_name.lower()
-    for d in S4_SET.iterdir():
+    for d in OT_SET.iterdir():
         try:
             if d.is_dir() and d.name.lower() == pl:
                 return True
@@ -65,7 +75,7 @@ def extract_project(zip_path):
         for member in zf.namelist():
             if member.endswith('/'):
                 continue
-            dest = S4_SET / member
+            dest = OT_SET / member
             dest.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(member) as src, open(dest, 'wb') as dst:
                 dst.write(src.read())
@@ -75,22 +85,22 @@ def extract_project(zip_path):
 
 
 def push(pattern=None, force=False):
-    if not S4_DEVICE.exists():
-        print(f'Error: S-4 not found at {S4_DEVICE}')
+    if not OT_DEVICE.exists():
+        print(f'Error: Octatrack not found at {OT_DEVICE}')
         sys.exit(1)
-    S4_SET.mkdir(parents=True, exist_ok=True)
+    OT_SET.mkdir(parents=True, exist_ok=True)
 
     projects = find_projects(pattern)
     if not projects:
-        print('No .zip files found in tmp/torso-s4/')
+        print(f'No {SUFFIX} files matching <adj>-<noun> found in {DOWNLOADS}')
         return
 
     print(f'Found {len(projects)} project(s):')
     copied = 0
     for p in projects:
         name = project_name_from_zip(p)
-        if exists_on_s4(name):
-            print(f'  {name} (already exists, skipping)')
+        if exists_on_ot(name):
+            print(f'  {name} (already on device, skipping)')
             continue
         if force:
             n = extract_project(p)
@@ -101,7 +111,7 @@ def push(pattern=None, force=False):
                 n = extract_project(p)
                 print(f'    Extracted ({n} samples).')
                 copied += 1
-    print(f'\nCopied {copied} project(s) to {S4_SET}')
+    print(f'\nCopied {copied} project(s) to {OT_SET}')
 
 
 def main():

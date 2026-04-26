@@ -1,44 +1,45 @@
 #!/usr/bin/env python
-"""Push OT project zips to the Octatrack CF card under the strudelbeats set.
+"""Push torso-s4 project zips to the S-4 over USB mass storage.
 
-Shared by both Octatrack export targets (`ot-basic` and `ot-doom`).
-The first positional arg picks the target; remaining args mirror the
-single-target script (a name fragment to filter by, plus -f to skip
-prompting).
-
-Each target's zips live in `tmp/<target>/` and get extracted into
-`/Volumes/OCTATRACK/strudelbeats/`.
+Source zips are read from `~/Downloads/<name>.s4.zip` — that's where
+the browser saves what the strudelbreaks server streams back. Each
+zip is extracted into `/Volumes/S4/samples/strudelbeats/`. The S-4's
+`/samples/` is the manual-defined location for user-imported wavs
+(factory content lives in `/FACTORY/` and isn't visible in MSD mode);
+we keep all strudelbreaks output corralled under a single
+`strudelbeats/` subfolder there so it's easy to back up or wipe as
+a unit.
 
 Usage:
-    push.py <target>                  # list all, ask per project
-    push.py <target> pattern          # filter by name fragment, ask per project
-    push.py <target> -f               # copy all without prompting (skip existing)
-    push.py <target> -f pattern       # copy matching without prompting
-
-  <target> ∈ {ot-basic, ot-doom}
+    push.py              # list all, ask per project
+    push.py pattern      # filter by name fragment
+    push.py -f           # copy all without prompting (skip existing)
+    push.py -f pattern   # copy matching without prompting
 """
 
 import argparse
 import pathlib
+import re
 import sys
 import zipfile
 
-SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent.parent.parent
-TARGETS = ('ot-basic', 'ot-doom')
-OT_DEVICE = pathlib.Path('/Volumes/OCTATRACK')
-OT_SET = OT_DEVICE / 'strudelbeats'
+DOWNLOADS = pathlib.Path.home() / 'Downloads'
+SUFFIX = '.s4.zip'
+# Strict adj-noun guard so unrelated `.s4.zip` files don't get
+# auto-pushed alongside the seeded ones. Custom-named exports stay
+# manual.
+NAME_PATTERN = re.compile(r'^[a-z]+-[a-z]+\.s4\.zip$')
+S4_DEVICE = pathlib.Path('/Volumes/S4')
+S4_SET = S4_DEVICE / 'samples' / 'strudelbeats'
 
 
-def source_dir(target):
-    return REPO_ROOT / 'tmp' / target
-
-
-def find_projects(target, pattern=None):
-    src = source_dir(target)
-    if not src.exists():
+def find_projects(pattern=None):
+    if not DOWNLOADS.exists():
         return []
-    projects = list(src.glob('*.zip'))
+    projects = [
+        p for p in DOWNLOADS.iterdir()
+        if p.is_file() and NAME_PATTERN.match(p.name)
+    ]
     if pattern:
         pl = pattern.lower()
         projects = [p for p in projects if pl in p.name.lower()]
@@ -48,16 +49,17 @@ def find_projects(target, pattern=None):
 def project_name_from_zip(zip_path):
     with zipfile.ZipFile(zip_path, 'r') as zf:
         for name in zf.namelist():
-            if name.endswith('.work'):
-                return name.split('/')[0]
-    return zip_path.stem.upper()
+            head = name.split('/', 1)[0]
+            if head:
+                return head
+    return zip_path.name[:-len(SUFFIX)]
 
 
-def exists_on_ot(project_name):
-    if not OT_SET.exists():
+def exists_on_s4(project_name):
+    if not S4_SET.exists():
         return False
     pl = project_name.lower()
-    for d in OT_SET.iterdir():
+    for d in S4_SET.iterdir():
         try:
             if d.is_dir() and d.name.lower() == pl:
                 return True
@@ -72,7 +74,7 @@ def extract_project(zip_path):
         for member in zf.namelist():
             if member.endswith('/'):
                 continue
-            dest = OT_SET / member
+            dest = S4_SET / member
             dest.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(member) as src, open(dest, 'wb') as dst:
                 dst.write(src.read())
@@ -81,23 +83,22 @@ def extract_project(zip_path):
     return sample_count
 
 
-def push(target, pattern=None, force=False):
-    if not OT_DEVICE.exists():
-        print(f'Error: Octatrack not found at {OT_DEVICE}')
+def push(pattern=None, force=False):
+    if not S4_DEVICE.exists():
+        print(f'Error: S-4 not found at {S4_DEVICE}')
         sys.exit(1)
-    OT_SET.mkdir(parents=True, exist_ok=True)
+    S4_SET.mkdir(parents=True, exist_ok=True)
 
-    src = source_dir(target)
-    projects = find_projects(target, pattern)
+    projects = find_projects(pattern)
     if not projects:
-        print(f'No .zip files found in {src.relative_to(REPO_ROOT)}/')
+        print(f'No {SUFFIX} files matching <adj>-<noun> found in {DOWNLOADS}')
         return
 
     print(f'Found {len(projects)} project(s):')
     copied = 0
     for p in projects:
         name = project_name_from_zip(p)
-        if exists_on_ot(name):
+        if exists_on_s4(name):
             print(f'  {name} (already exists, skipping)')
             continue
         if force:
@@ -109,17 +110,15 @@ def push(target, pattern=None, force=False):
                 n = extract_project(p)
                 print(f'    Extracted ({n} samples).')
                 copied += 1
-    print(f'\nCopied {copied} project(s) to {OT_SET}')
+    print(f'\nCopied {copied} project(s) to {S4_SET}')
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('target', choices=TARGETS,
-                    help='which Octatrack export target to push')
     ap.add_argument('pattern', nargs='?', default=None)
     ap.add_argument('-f', '--force', action='store_true')
     args = ap.parse_args()
-    push(args.target, args.pattern, args.force)
+    push(args.pattern, args.force)
 
 
 if __name__ == '__main__':

@@ -274,12 +274,88 @@ let capturesPayload = capturesStore.get() || { ...captureDefault };
 capturesPayload.context = captureContext;
 capturesStore.set(capturesPayload);
 
+const SERVER_URL = 'http://127.0.0.1:8000';
+
+const EXPORT_TARGETS = [
+  { label: 'json',      kind: 'local'  },
+  { label: 'strudel',   kind: 'text',   target: 'strudel'  },
+  { label: 'ot-basic',  kind: 'binary', target: 'ot-basic' },
+  { label: 'ot-doom',   kind: 'binary', target: 'ot-doom'  },
+  { label: 'torso-s4',  kind: 'binary', target: 'torso-s4' },
+];
+
+async function postExport(endpointPath, body) {
+  const r = await fetch(SERVER_URL + endpointPath, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    let detail = '';
+    try { detail = await r.text(); } catch (_) { /* ignore */ }
+    throw new Error('HTTP ' + r.status + ': ' + detail.slice(0, 200));
+  }
+  const cd = r.headers.get('Content-Disposition') || '';
+  const m = cd.match(/filename="([^"]+)"/);
+  const filename = m ? m[1] : 'export';
+  const blob = await r.blob();
+  return { filename, blob };
+}
+
+function downloadAs(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function exportViaServer(spec) {
+  const endpointPath = spec.kind === 'text'
+    ? '/api/export/text'
+    : '/api/export/binary';
+  try {
+    const { filename, blob } = await postExport(endpointPath, {
+      target: spec.target,
+      payload: capturesPayload,
+    });
+    downloadAs(blob, filename);
+  } catch (e) {
+    console.error('[tempera] export failed:', e);
+    alert(
+      'Export failed: ' + e.message +
+      '\n\nIs the strudelbreaks server running?\n  ./scripts/run.sh',
+    );
+  }
+}
+
+let exportMenu = null;
+const exportBtn = SB.ui.createButton('export ▾', function (e) {
+  // stopPropagation so the document-level outside-click listener
+  // installed by createActionMenu never sees the toggle's own
+  // re-click and re-opens the menu after we just closed it.
+  e.stopPropagation();
+  if (exportMenu) { exportMenu.close(); return; }
+  exportMenu = SB.ui.createActionMenu({
+    anchor: this,
+    items: EXPORT_TARGETS.map(spec => ({
+      label: spec.label,
+      onSelect: spec.kind === 'local'
+        ? () => capturesStore.exportAsFile('tempera-captures-' + gistId)
+        : () => exportViaServer(spec),
+    })),
+    onClose: () => { exportMenu = null; },
+  });
+});
 const capturesToolbar = SB.ui.createButtonBar({
   corner: 'top-right', id: 'captures-toolbar',
   stack: 'log-display',
   buttons: [
     SB.ui.createButton('new row', newRow),
-    SB.ui.createButton('export', () => capturesStore.exportAsFile('tempera-captures-' + gistId)),
+    exportBtn,
   ],
 });
 

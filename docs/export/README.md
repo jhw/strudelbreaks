@@ -1,25 +1,24 @@
 # Export targets
 
-Per-target documentation for `scripts/export/`. Each captures-JSON
-export (produced by tempera's "export" button) can be rendered into
-several formats:
+Per-target documentation for `app/export/`. The captures payload
+(persisted by tempera in `localStorage`) is rendered into one of
+several formats by the FastAPI server in `app/`; each target's render
+module here is imported and called by `app/exporters.py`.
 
-| Doc | Target | Output | Source mode |
+| Doc | Target | Filename | Source mode |
 |---|---|---|---|
-| [octatrack.md](octatrack.md) | `scripts/export/octatrack/ot-basic/` | OT project zip — per-cell patterns, per-track stems | JSON-only (per-stem) |
-| [ot-doom.md](ot-doom.md) | `scripts/export/octatrack/ot-doom/` | OT project zip — megabreak-of-doom matrix chains, per-track stems | JSON-only (per-stem) |
-| [torso-s4.md](torso-s4.md) | `scripts/export/torso-s4/` | Torso S-4 sample bundle — one mixed WAV per row | `--source {json,wav}` (mixed) |
-| [strudel.md](strudel.md) | `scripts/export/strudel/` | Standalone `.strudel.js` playback template | (n/a — WAV-only by construction) |
+| [octatrack.md](octatrack.md) | `app/export/octatrack/ot_basic/` | `<name>.ot-basic.zip` — per-cell patterns, per-track stems | JSON-only (per-stem) |
+| [ot-doom.md](ot-doom.md) | `app/export/octatrack/ot_doom/` | `<name>.ot-doom.zip` — megabreak-of-doom matrix chains, per-track stems | JSON-only (per-stem) |
+| [torso-s4.md](torso-s4.md) | `app/export/torso_s4/` | `<name>.s4.zip` — Torso S-4 sample bundle, one mixed WAV per row | `source` ∈ `{json, wav}` (mixed) |
+| [strudel.md](strudel.md) | `app/export/strudel/` | `<name>.strudel.js` — standalone playback template | (n/a — WAV-only by construction) |
 
 ## Shared infrastructure
 
-- **`scripts/export/common/cli.py`** — argparse skeleton (export path,
-  `--name`, `--seed`).
-- **`scripts/export/common/schema.py`** — captures JSON schema gate
+- **`app/export/common/schema.py`** — captures JSON schema gate
   (currently version 7).
-- **`scripts/export/common/names/`** — adjective × noun word lists
+- **`app/export/common/names/`** — adjective × noun word lists
   for default project / row names.
-- **`scripts/export/common/sample_source.py`** — break-name → local
+- **`app/export/common/sample_source.py`** — break-name → local
   WAV path resolver, shared by the three audio targets. Two source
   modes:
   - `json` (default) — fetch each break's beatwav pattern JSON from
@@ -52,7 +51,7 @@ several formats:
   JSON mode mirrors `s3://wol-samplebank/samples/` to `tmp/oneshots/`
   via `aws s3 sync` on first use — that's where the one-shot drum
   samples beatwav references live.
-- **`scripts/export/common/devices.py`** — per-device sample-rate
+- **`app/export/common/devices.py`** — per-device sample-rate
   constants (`OT_SAMPLE_RATE`, `S4_SAMPLE_RATE`) shared across
   targets so the two Octatrack targets can't drift apart.
 
@@ -62,4 +61,4 @@ several formats:
 double-quote-to-Pattern lifting, slider literal-args constraint,
 polymetric stretch, runtime-string lifting via `.fmap(mini).innerJoin()`.
 Relevant when editing `tempera.strudel.js` or the
-`scripts/export/strudel/templates/` Jinja2 source.
+`app/export/strudel/templates/` Jinja2 source.

@@ -28,16 +28,11 @@ total length of N concatenated events is therefore exactly
 from __future__ import annotations
 
 import pathlib
-import sys
 from typing import Dict, List, Optional
 
 from pydub import AudioSegment
 
-# Cross-subdir import: scripts/export/ on path so we can pull the
-# shared device-rate constant. Mirrors the trick render.py uses.
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
-
-from common.devices import S4_SAMPLE_RATE  # noqa: E402
+from app.export.common.devices import S4_SAMPLE_RATE
 
 # Torso S-4 native ceiling; everything we ship lands at S4_SAMPLE_RATE.
 # See docs/export/torso-s4.md for why we pin this rather than passing

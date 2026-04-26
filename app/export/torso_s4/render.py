@@ -19,13 +19,12 @@ landing at `/Volumes/S4/samples/strudelbeats/<project>/<row>.wav` —
 the S-4's manual-defined `/samples/` is where user-imported wavs
 belong.
 
-Usage:
-    python scripts/export/torso-s4/render.py <export.json>
-        [--name NAME] [--seed N]
+Imported and called by the FastAPI server (`app/exporters.py`) — no CLI;
+the server writes the captures payload to a temp file and points
+`output_dir` / `render_dir` at a temp dir.
 
-The seed deterministically selects the project name and the per-row
-wav names, so re-running the same export with the same seed
-reproduces the bundle byte-for-byte.
+The seed deterministically selects the per-row wav names, so re-running
+the same export with the same seed reproduces the bundle byte-for-byte.
 """
 from __future__ import annotations
 
@@ -34,14 +33,11 @@ import random
 import sys
 import zipfile
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+from app.export.common import sample_source
+from app.export.common.names import generate_name
+from app.export.common.schema import load_export
 
-from common import sample_source
-from common.cli import build_parser, require_file, resolve_name
-from common.names import generate_name
-from common.schema import load_export
-
-from audio import (
+from .audio import (
     S4_SAMPLE_RATE,
     equal_slices,
     export_wav,
@@ -53,8 +49,7 @@ from audio import (
 
 N_SLICES = 16
 
-SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent.parent.parent
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 OUTPUT_DIR = REPO_ROOT / 'tmp' / 'torso-s4'
 RENDER_DIR = REPO_ROOT / 'tmp' / 'torso-s4-render'
 
@@ -142,42 +137,31 @@ def build_row_wavs(export_path, name, seed=None, source='json'):
     return out
 
 
-def render(export_path, name, seed=None, source='json'):
+def render(export_path, name, *, seed=None, source='json',
+           output_dir=None, render_dir=None):
     """Render an export → project zip; return the zip path."""
     rows = build_row_wavs(export_path, name, seed=seed, source=source)
 
-    render_dir = RENDER_DIR / name
-    if render_dir.exists():
-        for old in render_dir.glob('*.wav'):
+    render_root = pathlib.Path(render_dir) if render_dir is not None else RENDER_DIR
+    project_render_dir = render_root / name
+    if project_render_dir.exists():
+        for old in project_render_dir.glob('*.wav'):
             old.unlink()
-    render_dir.mkdir(parents=True, exist_ok=True)
+    project_render_dir.mkdir(parents=True, exist_ok=True)
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    zip_path = OUTPUT_DIR / f'{name}.zip'
+    out_dir = pathlib.Path(output_dir) if output_dir is not None else OUTPUT_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = out_dir / f'{name}.zip'
 
-    # Write each wav once into render_dir, then bundle into zip with
-    # a top-level <project>/<wav> layout so push.py can extract under
-    # /Volumes/S4/samples/strudelbeats/ and land at
+    # Write each wav once into project_render_dir, then bundle into zip
+    # with a top-level <project>/<wav> layout so push.py can extract
+    # under /Volumes/S4/samples/strudelbeats/ and land at
     # /Volumes/S4/samples/strudelbeats/<project>/<wav>.
     for filename, seg in rows:
-        export_wav(seg, render_dir / filename)
+        export_wav(seg, project_render_dir / filename)
 
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
         for filename, _ in rows:
-            zf.write(render_dir / filename, arcname=f'{name}/{filename}')
+            zf.write(project_render_dir / filename, arcname=f'{name}/{filename}')
 
     return zip_path
-
-
-def main():
-    parser = build_parser(__doc__.splitlines()[0])
-    sample_source.add_source_arg(parser)
-    args = parser.parse_args()
-    require_file(args.export)
-    out = render(args.export, resolve_name(args),
-                 seed=args.seed, source=args.source)
-    print(out)
-
-
-if __name__ == '__main__':
-    main()

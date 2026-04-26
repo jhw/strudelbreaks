@@ -1,4 +1,8 @@
 beatwav @ git+ssh://git@github.com/jhw/beatwav.git@v0.2.2
+fastapi>=0.115
+httpx>=0.27
 jinja2>=3.1
 octapy @ git+https://github.com/jhw/octapy.git@v0.1.31
+pydantic>=2.7
 pydub>=0.25
+uvicorn[standard]>=0.30

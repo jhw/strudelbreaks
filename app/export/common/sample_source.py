@@ -56,8 +56,7 @@ log = logging.getLogger(__name__)
 
 ONESHOT_S3_URI = 's3://wol-samplebank/samples/'
 
-SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent.parent.parent
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 ONESHOT_CACHE = REPO_ROOT / 'tmp' / 'oneshots'
 SAMPLES_CACHE = REPO_ROOT / 'tmp' / 'samples'
 

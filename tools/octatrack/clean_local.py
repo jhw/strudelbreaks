@@ -1,8 +1,13 @@
 #!/usr/bin/env python
-"""Remove locally generated torso-s4 zips from tmp/torso-s4/.
+"""Remove OT project zips from ~/Downloads.
+
+Iterates `~/Downloads/<adjective>-<noun>.ot.zip` (the strict adj-noun
+guard keeps custom-named or unrelated zips out of the match) and asks
+per file. No device check — the user typically runs this after `push.py`
+has copied everything they wanted.
 
 Usage:
-    clean_local.py              # list all, ask per project
+    clean_local.py              # list all, ask per file
     clean_local.py pattern      # filter by name fragment
     clean_local.py -f           # remove all without prompting
     clean_local.py -f pattern   # remove matching without prompting
@@ -10,16 +15,20 @@ Usage:
 
 import argparse
 import pathlib
+import re
 
-SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent.parent.parent
-S4_DIR = REPO_ROOT / 'tmp' / 'torso-s4'
+DOWNLOADS = pathlib.Path.home() / 'Downloads'
+SUFFIX = '.ot.zip'
+NAME_PATTERN = re.compile(r'^[a-z]+-[a-z]+\.ot\.zip$')
 
 
 def find_projects(pattern=None):
-    if not S4_DIR.exists():
+    if not DOWNLOADS.exists():
         return []
-    projects = list(S4_DIR.glob('*.zip'))
+    projects = [
+        p for p in DOWNLOADS.iterdir()
+        if p.is_file() and NAME_PATTERN.match(p.name)
+    ]
     if pattern:
         pl = pattern.lower()
         projects = [p for p in projects if pl in p.name.lower()]
@@ -29,22 +38,22 @@ def find_projects(pattern=None):
 def clean(pattern=None, force=False):
     projects = find_projects(pattern)
     if not projects:
-        print('No projects found')
+        print(f'No {SUFFIX} files matching <adj>-<noun> found in {DOWNLOADS}')
         return
 
-    print(f'Found {len(projects)} project(s):')
+    print(f'Found {len(projects)} file(s):')
     removed = 0
     for p in projects:
         if force:
             p.unlink()
-            print(f'  Removed {p.stem}')
+            print(f'  Removed {p.name}')
             removed += 1
         else:
-            if input(f'  Remove {p.stem}? [y/N] ').lower() == 'y':
+            if input(f'  Remove {p.name}? [y/N] ').lower() == 'y':
                 p.unlink()
                 print('    Removed.')
                 removed += 1
-    print(f'\nRemoved {removed} of {len(projects)} project(s).')
+    print(f'\nRemoved {removed} of {len(projects)} file(s).')
 
 
 def main():

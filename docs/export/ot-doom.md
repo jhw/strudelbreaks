@@ -1,22 +1,19 @@
 # Octatrack "Megabreak of Doom" export — `ot-doom`
 
-Second Octatrack export target alongside `scripts/export/octatrack/ot-basic/`.
+Second Octatrack export target alongside `app/export/octatrack/ot_basic/`.
 Renders a tempera captures JSON into an OT project where the crossfader
 sweeps continuously between the cells of each row — different captured
 patterns become a single morphable timeline.
 
-CLI:
+Invocation: tempera's `export ▾` menu → `ot-doom`. Posts the captures
+payload to `POST /api/export/binary` (`target='ot-doom'`); the server
+calls `app.export.octatrack.ot_doom.render.render()` and streams the
+project zip back. Browser saves to `~/Downloads/<name>.ot-doom.zip`.
 
-```
-python scripts/export/octatrack/ot-doom/render.py <export.json>
-    [--name NAME] [--seed N]
-```
-
-Output: `tmp/ot-doom/<name>.zip`. JSON-source rendering only — each
-break is rendered as three drum stems (kick / snare / hat) via
-beatwav at 44.1 kHz, then stacked into one packed sample per chain
-position so T1, T2, T3 each play their own stem under independent
-scene drives.
+JSON-source rendering only — each break is rendered as three drum
+stems (kick / snare / hat) via beatwav at 44.1 kHz, then stacked into
+one packed sample per chain position so T1, T2, T3 each play their
+own stem under independent scene drives.
 
 ## Two readings of "Megabreak of Doom"
 
@@ -57,32 +54,29 @@ to a row is a one-click action in the captures UI.
 
 ## Layout
 
-Both Octatrack export targets live under `scripts/export/octatrack/`,
-sharing one set of push/clean scripts at the parent level:
+Both Octatrack render packages live under `app/export/octatrack/`,
+sharing one set of push/clean scripts at `scripts/octatrack/`:
 
 ```
-scripts/export/octatrack/
-├── push.py            # shared, takes target arg {ot-basic, ot-doom}
-├── clean_local.py     # shared, takes target arg
-├── clean_remote.py    # shared, no params
-├── clean_stubs.py     # shared, no params
-├── ot-basic/
-│   └── render.py
-└── ot-doom/
-    ├── render.py      # main entry, build & zip a project
-    └── audio.py       # pydub helpers: cell render + matrix chain
+app/export/octatrack/                scripts/octatrack/
+├── ot_basic/                        ├── push.py        # shared, takes target arg {ot-basic, ot-doom}
+│   └── render.py                    ├── clean_remote.py
+└── ot_doom/                         └── clean_stubs.py
+    ├── render.py
+    └── audio.py
 ```
 
-`tmp/ot-doom/<name>.zip` is the build output (sibling of
-`tmp/ot-basic/<name>.zip` for the per-cell-pattern target). The
+The downloaded artifact is `~/Downloads/<name>.ot-doom.zip` (sibling
+of `<name>.ot-basic.zip` for the per-cell-pattern target). The
 push/clean scripts target the same `/Volumes/OCTATRACK/strudelbeats/`
 set as the basic target, so projects from both renderers coexist on
 the card.
 
 ## Render contract
 
-Same export schema as `octatrack/render.py` (schema 7, validated via
-`common/schema.py`). The OT-side configuration uses octapy's
+Same export schema as `app/export/octatrack/ot_basic/render.py` (schema
+7, validated via `app/export/common/schema.py`). The OT-side
+configuration uses octapy's
 `AudioSceneTrack.slice_index` (added in octapy 0.1.23) — confirmed
 present in 0.1.31, the version pinned in `requirements.txt`.
 
@@ -277,7 +271,7 @@ under `tmp/samples/<gistId>/rendered/sr44100_bpm<bpm>/<name>__<track>.wav`
 (flat layout — basenames must stay unique because the OT slot
 manager deduplicates by basename).
 See `docs/export/octatrack.md` for the full list of device-side
-constraints and `scripts/export/common/sample_source.py` for the
+constraints and `app/export/common/sample_source.py` for the
 shared resolver.
 
 ## File layout in the project bundle
@@ -296,8 +290,10 @@ ot-doom-<name>.zip
     └── b02_p01_chain00.wav    # bank 2, pattern 1, chain 0 (17th row)
 ```
 
-Chain WAVs land in `tmp/ot-doom-render/<name>/bank<NN>/`; the zip
-gathers them into the OT-conventional `AUDIO/projects/<NAME>/`.
+Chain WAVs are written to a per-request `tempfile.TemporaryDirectory()`
+under `<tmp>/render/<name>/bank<NN>/`; the zip gathers them into the
+OT-conventional `AUDIO/projects/<NAME>/` and the temp dir is removed
+after the response is streamed.
 
 ## Open questions / risks
 

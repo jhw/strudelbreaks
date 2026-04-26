@@ -24,19 +24,18 @@ per drum stem at OT_SAMPLE_RATE via beatwav. Cached under
 tmp/samples/<gistId>/. Each per-stem flex slot gets 16 equal slice
 markers so the slice_index p-locks resolve on-device.
 
-Usage:
-    python scripts/export/octatrack/ot-basic/render.py <path/to/export.json> [--name NAME] [--seed N]
+Imported and called by the FastAPI server (`app.exporters`) — no CLI;
+the server writes the captures payload to a temp file and points
+`output_dir` at a temp dir.
 
 Output:
-    tmp/ot-basic/<name>.zip
+    <output_dir>/<name>.zip   (defaults to tmp/ot-basic/)
 """
 from __future__ import annotations
 
 import pathlib
 import sys
 import wave
-
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent))
 
 from octapy import (
     Project,
@@ -47,10 +46,9 @@ from octapy import (
     TrigCondition,
 )
 
-from common import sample_source
-from common.cli import build_parser, require_file, resolve_name
-from common.devices import OT_SAMPLE_RATE
-from common.schema import load_export
+from app.export.common import sample_source
+from app.export.common.devices import OT_SAMPLE_RATE
+from app.export.common.schema import load_export
 
 # Per-drum stems we ask beatwav to produce. Maps to OT audio tracks
 # 1/2/3 in trig order.
@@ -90,8 +88,7 @@ PROBABILITY_BUCKETS = [
     (99, TrigCondition.PERCENT_99),
 ]
 
-SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent.parent.parent.parent
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 OUTPUT_DIR = REPO_ROOT / 'tmp' / 'ot-basic'
 
 REQUIRED_CTX = ('gistUser', 'gistId', 'bpm', 'eventsPerCycle', 'nSlices')
@@ -263,24 +260,10 @@ def build_project(export_path, name, probability=1.0):
     return project
 
 
-def render(export_path, name, probability=1.0):
+def render(export_path, name, *, probability=1.0, output_dir=None):
     project = build_project(export_path, name, probability=probability)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    zip_path = OUTPUT_DIR / f'{name}.zip'
+    out_dir = pathlib.Path(output_dir) if output_dir is not None else OUTPUT_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = out_dir / f'{name}.zip'
     project.to_zip(zip_path)
     return zip_path
-
-
-def main():
-    parser = build_parser(__doc__.splitlines()[0])
-    parser.add_argument('--probability', type=float, default=1.0,
-                        help='per-trig probability in [0, 1] (default 1.0 = always fires); '
-                             'snaps to the nearest OT trig-condition bucket')
-    args = parser.parse_args()
-    require_file(args.export)
-    out = render(args.export, resolve_name(args), probability=args.probability)
-    print(out)
-
-
-if __name__ == '__main__':
-    main()
