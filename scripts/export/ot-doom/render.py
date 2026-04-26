@@ -25,10 +25,8 @@ Output:
 """
 from __future__ import annotations
 
-import json
 import pathlib
 import sys
-import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -37,10 +35,12 @@ from octapy import (
     SliceMode,
 )
 
+from common import sample_source
 from common.cli import build_parser, require_file, resolve_name
 from common.schema import load_export
 
 from audio import (
+    OT_SAMPLE_RATE,
     build_matrix_chain,
     equal_slices,
     export_wav,
@@ -60,35 +60,9 @@ ALLOWED_INPUT_COUNTS = (4, 8, 16)
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 OUTPUT_DIR = REPO_ROOT / 'tmp' / 'ot-doom'
-SAMPLES_DIR = REPO_ROOT / 'tmp' / 'samples'
 RENDER_DIR = REPO_ROOT / 'tmp' / 'ot-doom-render'
 
 REQUIRED_CTX = ('gistUser', 'gistId', 'bpm', 'eventsPerCycle', 'nSlices')
-
-
-def fetch_sample_manifest(gist_user, gist_id):
-    url = f'https://gist.githubusercontent.com/{gist_user}/{gist_id}/raw/strudel.json'
-    with urllib.request.urlopen(url) as r:
-        data = json.loads(r.read())
-    base = data.get('_base', '')
-    out = {}
-    for k, v in data.items():
-        if k.startswith('_'):
-            continue
-        first = v[0] if isinstance(v, list) else v
-        out[k] = base + first if not first.startswith(('http://', 'https://')) else first
-    return out
-
-
-def cache_sample(name, url, cache_dir):
-    ext = pathlib.Path(url.split('?', 1)[0]).suffix or '.wav'
-    path = cache_dir / f'{name}{ext}'
-    if path.exists():
-        return path
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url) as r, open(path, 'wb') as f:
-        f.write(r.read())
-    return path
 
 
 def set_equal_slices(project, slot, n_slices, segment_ms, sample_rate):
@@ -183,7 +157,7 @@ def render_row(
         step.sample_lock = flex_slots[k]
 
 
-def build_project(export_path, name):
+def build_project(export_path, name, source='json'):
     payload, ctx = load_export(export_path, REQUIRED_CTX)
     if ctx['nSlices'] != N_SLICES:
         sys.exit(f'nSlices {ctx["nSlices"]} != {N_SLICES} (ot-doom assumes 16)')
@@ -194,21 +168,21 @@ def build_project(export_path, name):
     if len(rows_in) > 16:
         sys.exit(f'too many rows: {len(rows_in)} > 16')
 
-    # Source-break manifest: download wavs into the shared sample cache
-    # (also used by the existing octatrack target so they're not
-    # re-downloaded across runs).
-    manifest = fetch_sample_manifest(ctx['gistUser'], ctx['gistId'])
-    cache_dir = SAMPLES_DIR / ctx['gistId']
+    all_names = sorted({
+        break_name
+        for cells in rows_in
+        for cell in cells
+        for break_name in cell['break']
+    })
 
-    all_names = set()
-    for cells in rows_in:
-        for cell in cells:
-            for break_name in cell['break']:
-                all_names.add(break_name)
-    missing = [n for n in all_names if n not in manifest]
-    if missing:
-        sys.exit(f'sample gist missing breaks: {missing}')
-    paths = {n: cache_sample(n, manifest[n], cache_dir) for n in all_names}
+    paths = sample_source.resolve_break_paths(
+        gist_user=ctx['gistUser'],
+        gist_id=ctx['gistId'],
+        names=all_names,
+        source=source,
+        target_bpm=ctx['bpm'],
+        target_sample_rate=OT_SAMPLE_RATE,
+    )
 
     project = Project.from_template(name.upper()[:16])
     project.settings.tempo = float(ctx['bpm'])
@@ -238,8 +212,8 @@ def build_project(export_path, name):
     return project
 
 
-def render(export_path, name):
-    project = build_project(export_path, name)
+def render(export_path, name, source='json'):
+    project = build_project(export_path, name, source=source)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     zip_path = OUTPUT_DIR / f'{name}.zip'
     project.to_zip(zip_path)
@@ -247,9 +221,11 @@ def render(export_path, name):
 
 
 def main():
-    args = build_parser(__doc__.splitlines()[0]).parse_args()
+    parser = build_parser(__doc__.splitlines()[0])
+    sample_source.add_source_arg(parser)
+    args = parser.parse_args()
     require_file(args.export)
-    out = render(args.export, resolve_name(args))
+    out = render(args.export, resolve_name(args), source=args.source)
     print(out)
 
 

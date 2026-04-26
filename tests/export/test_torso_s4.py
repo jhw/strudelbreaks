@@ -11,7 +11,6 @@ from ._fixtures import (
     make_break_wavs,
     make_capture_cell,
     make_export,
-    stub_sample_fetch,
 )
 
 
@@ -54,7 +53,7 @@ class TorsoS4RoundtripTest(unittest.TestCase):
         render = load_render_module('torso-s4')
         with WorkDir() as wd:
             paths = make_break_wavs(wd.samples, ['kk', 'sn'], bpm=120, steps=32)
-            stub_sample_fetch(render, paths)
+            wd.stub_sources(paths)
 
             payload = make_export([
                 # row 1: 1 cell
@@ -83,7 +82,7 @@ class TorsoS4RoundtripTest(unittest.TestCase):
         render = load_render_module('torso-s4')
         with WorkDir() as wd:
             paths = make_break_wavs(wd.samples, ['a'], bpm=120, steps=32)
-            stub_sample_fetch(render, paths)
+            wd.stub_sources(paths)
 
             # Row 1: 1 cell. Row 2: 2 cells. At 120 BPM, 4 beats/cycle,
             # 8 events/cycle, each event is 250 ms → 1 cell = 2000 ms.
@@ -123,7 +122,7 @@ class TorsoS4RoundtripTest(unittest.TestCase):
         render = load_render_module('torso-s4')
         with WorkDir() as wd:
             paths = make_break_wavs(wd.samples, ['a'], bpm=128, steps=32)
-            stub_sample_fetch(render, paths)
+            wd.stub_sources(paths)
             payload = make_export([
                 [make_capture_cell(['a'], [0, 1, 2, 3, 4, 5, 6, 7])
                  for _ in range(4)],
@@ -151,7 +150,7 @@ class TorsoS4RoundtripTest(unittest.TestCase):
         render = load_render_module('torso-s4')
         with WorkDir() as wd:
             paths = make_break_wavs(wd.samples, ['a'], bpm=120, steps=32)
-            stub_sample_fetch(render, paths)
+            wd.stub_sources(paths)
             payload = make_export([
                 [make_capture_cell(['a'], [0, 1, 2, 3, 4, 5, 6, 7])],
             ])
@@ -173,7 +172,7 @@ class TorsoS4RoundtripTest(unittest.TestCase):
         render = load_render_module('torso-s4')
         with WorkDir() as wd:
             paths = make_break_wavs(wd.samples, ['a'], bpm=120, steps=32)
-            stub_sample_fetch(render, paths)
+            wd.stub_sources(paths)
             payload = make_export([
                 [make_capture_cell(['a'], [0, 1, 2, 3, 4, 5, 6, 7])],
             ])

@@ -29,20 +29,20 @@ reproduces the bundle byte-for-byte.
 """
 from __future__ import annotations
 
-import json
 import pathlib
 import random
 import sys
-import urllib.request
 import zipfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
+from common import sample_source
 from common.cli import build_parser, require_file, resolve_name
 from common.names import generate_name
 from common.schema import load_export
 
 from audio import (
+    S4_SAMPLE_RATE,
     equal_slices,
     export_wav,
     load_break,
@@ -56,36 +56,10 @@ N_SLICES = 16
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 OUTPUT_DIR = REPO_ROOT / 'tmp' / 'torso-s4'
-SAMPLES_DIR = REPO_ROOT / 'tmp' / 'samples'
 RENDER_DIR = REPO_ROOT / 'tmp' / 'torso-s4-render'
 
 REQUIRED_CTX = ('gistUser', 'gistId', 'bpm', 'beatsPerCycle',
                 'eventsPerCycle', 'nSlices')
-
-
-def fetch_sample_manifest(gist_user, gist_id):
-    url = f'https://gist.githubusercontent.com/{gist_user}/{gist_id}/raw/strudel.json'
-    with urllib.request.urlopen(url) as r:
-        data = json.loads(r.read())
-    base = data.get('_base', '')
-    out = {}
-    for k, v in data.items():
-        if k.startswith('_'):
-            continue
-        first = v[0] if isinstance(v, list) else v
-        out[k] = base + first if not first.startswith(('http://', 'https://')) else first
-    return out
-
-
-def cache_sample(name, url, cache_dir):
-    ext = pathlib.Path(url.split('?', 1)[0]).suffix or '.wav'
-    path = cache_dir / f'{name}{ext}'
-    if path.exists():
-        return path
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url) as r, open(path, 'wb') as f:
-        f.write(r.read())
-    return path
 
 
 def event_ms(bpm, beats_per_cycle, events_per_cycle):
@@ -120,7 +94,7 @@ def unique_row_names(rng, count):
     return out
 
 
-def build_row_wavs(export_path, name, seed=None):
+def build_row_wavs(export_path, name, seed=None, source='json'):
     """Return a list of (filename, AudioSegment) for each non-empty row."""
     payload, ctx = load_export(export_path, REQUIRED_CTX)
     if ctx['nSlices'] != N_SLICES:
@@ -130,19 +104,21 @@ def build_row_wavs(export_path, name, seed=None):
     if not banks_in:
         sys.exit('no non-empty banks in export')
 
-    manifest = fetch_sample_manifest(ctx['gistUser'], ctx['gistId'])
+    all_names = sorted({
+        break_name
+        for bank_cells in banks_in
+        for cell in bank_cells
+        for break_name in cell['break']
+    })
 
-    all_names = set()
-    for bank_cells in banks_in:
-        for cell in bank_cells:
-            for break_name in cell['break']:
-                all_names.add(break_name)
-    missing = [n for n in all_names if n not in manifest]
-    if missing:
-        sys.exit(f'sample gist missing breaks: {missing}')
-
-    cache_dir = SAMPLES_DIR / ctx['gistId']
-    paths = {n: cache_sample(n, manifest[n], cache_dir) for n in all_names}
+    paths = sample_source.resolve_break_paths(
+        gist_user=ctx['gistUser'],
+        gist_id=ctx['gistId'],
+        names=all_names,
+        source=source,
+        target_bpm=ctx['bpm'],
+        target_sample_rate=S4_SAMPLE_RATE,
+    )
 
     # Source slices: each break wav cut into 16 equal slices once.
     source_slices = {n: equal_slices(load_break(paths[n]), N_SLICES)
@@ -166,9 +142,9 @@ def build_row_wavs(export_path, name, seed=None):
     return out
 
 
-def render(export_path, name, seed=None):
+def render(export_path, name, seed=None, source='json'):
     """Render an export → project zip; return the zip path."""
-    rows = build_row_wavs(export_path, name, seed=seed)
+    rows = build_row_wavs(export_path, name, seed=seed, source=source)
 
     render_dir = RENDER_DIR / name
     if render_dir.exists():
@@ -195,9 +171,11 @@ def render(export_path, name, seed=None):
 
 def main():
     parser = build_parser(__doc__.splitlines()[0])
+    sample_source.add_source_arg(parser)
     args = parser.parse_args()
     require_file(args.export)
-    out = render(args.export, resolve_name(args), seed=args.seed)
+    out = render(args.export, resolve_name(args),
+                 seed=args.seed, source=args.source)
     print(out)
 
 

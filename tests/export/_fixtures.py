@@ -136,31 +136,40 @@ def make_export(
     }
 
 
-def stub_sample_fetch(render_module, name_to_path: Dict[str, pathlib.Path]) -> None:
-    """Patch `fetch_sample_manifest` and `cache_sample` on a renderer
-    so it reads our synthetic wavs instead of hitting the gist."""
+def stub_sample_source(name_to_path: Dict[str, pathlib.Path]):
+    """Replace `common.sample_source.resolve_break_paths` with a stub that
+    returns pre-supplied local files instead of hitting the gist or
+    rendering JSON. Returns a teardown callable that restores the
+    original — call it from a `finally` (or use `WorkDir.stub_sources`,
+    which wires teardown into the WorkDir's exit)."""
+    if str(EXPORT_ROOT) not in sys.path:
+        sys.path.insert(0, str(EXPORT_ROOT))
+    from common import sample_source
 
-    def fake_fetch(_user, _gid):
-        return {n: str(p) for n, p in name_to_path.items()}
+    original = sample_source.resolve_break_paths
 
-    def fake_cache(name, url, _cache_dir):
-        p = pathlib.Path(url)
-        if not p.exists():
-            raise FileNotFoundError(p)
-        return p
+    def fake_resolve(*, gist_user, gist_id, names, source,
+                     target_bpm, target_sample_rate, num_bars=2):
+        return {n: name_to_path[n] for n in names}
 
-    render_module.fetch_sample_manifest = fake_fetch
-    render_module.cache_sample = fake_cache
+    sample_source.resolve_break_paths = fake_resolve
+
+    def restore():
+        sample_source.resolve_break_paths = original
+
+    return restore
 
 
 class WorkDir:
     """Context manager that creates an ephemeral working tree:
     samples/, an export.json, and an output dir. Cleans up on exit
-    unless `keep=True`."""
+    unless `keep=True`. Also tracks any sample-source stubs registered
+    via `stub_sources` so they're torn down with the WorkDir."""
 
     def __init__(self, keep: bool = False):
         self._tmp = None
         self.keep = keep
+        self._teardowns = []
 
     def __enter__(self):
         self._tmp = tempfile.mkdtemp(prefix='strudelbreaks-test-')
@@ -172,6 +181,12 @@ class WorkDir:
         return self
 
     def __exit__(self, *exc):
+        for teardown in reversed(self._teardowns):
+            try:
+                teardown()
+            except Exception:
+                pass
+        self._teardowns.clear()
         if not self.keep:
             import shutil
             shutil.rmtree(self._tmp, ignore_errors=True)
@@ -179,3 +194,7 @@ class WorkDir:
     def write_export(self, payload: dict) -> pathlib.Path:
         self.export_path.write_text(json.dumps(payload))
         return self.export_path
+
+    def stub_sources(self, name_to_path: Dict[str, pathlib.Path]) -> None:
+        """Stub the shared sample_source for the lifetime of this WorkDir."""
+        self._teardowns.append(stub_sample_source(name_to_path))

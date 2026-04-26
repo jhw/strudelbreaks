@@ -1,3 +1,4 @@
+beatwav @ git+ssh://git@github.com/jhw/beatwav.git@v0.2.0
 jinja2>=3.1
 octapy @ git+https://github.com/jhw/octapy.git@v0.1.31
 pydub>=0.25

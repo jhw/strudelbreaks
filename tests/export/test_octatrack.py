@@ -11,7 +11,6 @@ from ._fixtures import (
     make_break_wavs,
     make_capture_cell,
     make_export,
-    stub_sample_fetch,
 )
 
 
@@ -91,7 +90,7 @@ class OctatrackRoundtripTest(unittest.TestCase):
         wd = WorkDir().__enter__()
         try:
             paths = make_break_wavs(wd.samples, ['kk', 'sn'], bpm=120, steps=32)
-            stub_sample_fetch(render, paths)
+            wd.stub_sources(paths)
             payload = make_export([[
                 make_capture_cell(['kk', 'sn', 'kk', 'sn'],
                                   [0, 4, 8, None, 1, 5, 9, 13]),
@@ -165,7 +164,7 @@ class OctatrackRoundtripTest(unittest.TestCase):
         render = load_render_module('octatrack')
         with WorkDir() as wd:
             paths = make_break_wavs(wd.samples, ['kk'], bpm=120, steps=32)
-            stub_sample_fetch(render, paths)
+            wd.stub_sources(paths)
             payload = make_export([[
                 make_capture_cell(['kk'], [0, 1, 2, 3, 4, 5, 6, 7]),
             ]])

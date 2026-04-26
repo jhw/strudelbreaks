@@ -23,7 +23,6 @@ from ._fixtures import (
     make_break_wavs,
     make_capture_cell,
     make_export,
-    stub_sample_fetch,
 )
 
 
@@ -106,7 +105,7 @@ class OtDoomCellCountValidationTest(unittest.TestCase):
     def _build_render(self, n_cells, wd):
         render = load_render_module('ot-doom')
         paths = make_break_wavs(wd.samples, ['a', 'b'], bpm=120)
-        stub_sample_fetch(render, paths)
+        wd.stub_sources(paths)
         cells = [
             make_capture_cell(['a', 'b', 'a', 'b'],
                               [0, 1, 2, 3, 4, 5, 6, 7])
@@ -157,7 +156,7 @@ class OtDoomRoundtripTest(unittest.TestCase):
         render = load_render_module('ot-doom')
         with WorkDir() as wd:
             paths = make_break_wavs(wd.samples, ['kk', 'sn'], bpm=120, steps=32)
-            stub_sample_fetch(render, paths)
+            wd.stub_sources(paths)
 
             # One row with 4 cells — varied patterns so the input renders
             # are non-identical.
@@ -228,7 +227,7 @@ class OtDoomRoundtripTest(unittest.TestCase):
         render = load_render_module('ot-doom')
         with WorkDir() as wd:
             paths = make_break_wavs(wd.samples, ['a', 'b'], bpm=120, steps=32)
-            stub_sample_fetch(render, paths)
+            wd.stub_sources(paths)
 
             def cells(offset):
                 return [

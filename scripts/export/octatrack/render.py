@@ -21,10 +21,8 @@ Output:
 """
 from __future__ import annotations
 
-import json
 import pathlib
 import sys
-import urllib.request
 import wave
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
@@ -38,8 +36,14 @@ from octapy import (
     TrigCondition,
 )
 
+from common import sample_source
 from common.cli import build_parser, require_file, resolve_name
 from common.schema import load_export
+
+# Octatrack expects 44.1 kHz playback. JSON-source rendering hits this
+# rate up-front; WAV-source bundling lands the gist's mixed-rate WAVs
+# as-is — see OCTATRACK.md for the latent-bug discussion.
+OT_SAMPLE_RATE = 44100
 
 # Source break wavs are 32 steps (2 bars at 1/16). N_SLICES=16 cuts them
 # into 16 slices of 2 steps each, so a slice spans an 1/8 note plus the
@@ -72,35 +76,8 @@ PROBABILITY_BUCKETS = [
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 OUTPUT_DIR = REPO_ROOT / 'tmp' / 'octatrack'
-SAMPLES_DIR = REPO_ROOT / 'tmp' / 'samples'
 
 REQUIRED_CTX = ('gistUser', 'gistId', 'bpm', 'eventsPerCycle', 'nSlices')
-
-
-def fetch_sample_manifest(gist_user, gist_id):
-    url = f'https://gist.githubusercontent.com/{gist_user}/{gist_id}/raw/strudel.json'
-    with urllib.request.urlopen(url) as r:
-        data = json.loads(r.read())
-    # Strudel manifest: { "_base": "...", "name": url | [urls], ... }
-    base = data.get('_base', '')
-    out = {}
-    for k, v in data.items():
-        if k.startswith('_'):
-            continue
-        first = v[0] if isinstance(v, list) else v
-        out[k] = base + first if not first.startswith(('http://', 'https://')) else first
-    return out
-
-
-def cache_sample(name, url, cache_dir):
-    ext = pathlib.Path(url.split('?', 1)[0]).suffix or '.wav'
-    path = cache_dir / f'{name}{ext}'
-    if path.exists():
-        return path
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url) as r, open(path, 'wb') as f:
-        f.write(r.read())
-    return path
 
 
 def wav_info(path):
@@ -162,7 +139,7 @@ def collect_break_names(banks):
     return names
 
 
-def build_project(export_path, name, probability=1.0):
+def build_project(export_path, name, probability=1.0, source='json'):
     trig_condition = probability_to_condition(probability)
     payload, ctx = load_export(export_path, REQUIRED_CTX)
     if ctx['nSlices'] != N_SLICES:
@@ -177,27 +154,27 @@ def build_project(export_path, name, probability=1.0):
         if len(bank) > 16:
             sys.exit(f'bank {i} has {len(bank)} cells > 16')
 
-    manifest = fetch_sample_manifest(ctx['gistUser'], ctx['gistId'])
     break_names = collect_break_names(banks_in)
-    missing = [n for n in break_names if n not in manifest]
-    if missing:
-        sys.exit(f'sample gist missing breaks: {missing}')
-
-    cache_dir = SAMPLES_DIR / ctx['gistId']
-    local_paths = {n: cache_sample(n, manifest[n], cache_dir) for n in break_names}
+    local_paths = sample_source.resolve_break_paths(
+        gist_user=ctx['gistUser'],
+        gist_id=ctx['gistId'],
+        names=break_names,
+        source=source,
+        target_bpm=ctx['bpm'],
+        target_sample_rate=OT_SAMPLE_RATE,
+    )
 
     project = Project.from_template(name.upper()[:16])
     project.settings.tempo = float(ctx['bpm'])
     project.master_track = True
 
-    # NOTE: source wavs are bundled at their native sample rate (the
-    # strudel sample gist mixes 44.1 and 48 kHz). The OT plays back
-    # assuming 44.1 kHz, so 48 kHz wavs run ~9% slow. In this target
-    # each trig plays for ~1/8 note before being replaced, so the
-    # drift doesn't accumulate audibly within a trig — but if trig
-    # timing ever changes (e.g. doom-style longer holds), resample on
-    # load to OT_SAMPLE_RATE the way ot-doom/audio.py does.
-    # See OCTATRACK.md for the constraint.
+    # NOTE on sample rate: in JSON-source mode (the default) WAVs are
+    # rendered at OT_SAMPLE_RATE = 44.1 kHz up-front, so the OT plays
+    # them back at the recorded rate. In WAV-source mode the gist's
+    # mixed-rate WAVs (44.1 / 48 kHz) are bundled as-is — see
+    # OCTATRACK.md: a 48 kHz file plays at ~91.9% speed, but each trig
+    # only fires for ~1/8 note before being replaced, so the drift is
+    # latent rather than audible. JSON mode fixes it for free.
     flex_slots = {}
     for n in break_names:
         path = local_paths[n]
@@ -246,8 +223,9 @@ def build_project(export_path, name, probability=1.0):
     return project
 
 
-def render(export_path, name, probability=1.0):
-    project = build_project(export_path, name, probability=probability)
+def render(export_path, name, probability=1.0, source='json'):
+    project = build_project(export_path, name,
+                            probability=probability, source=source)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     zip_path = OUTPUT_DIR / f'{name}.zip'
     project.to_zip(zip_path)
@@ -259,9 +237,11 @@ def main():
     parser.add_argument('--probability', type=float, default=1.0,
                         help='per-trig probability in [0, 1] (default 1.0 = always fires); '
                              'snaps to the nearest OT trig-condition bucket')
+    sample_source.add_source_arg(parser)
     args = parser.parse_args()
     require_file(args.export)
-    out = render(args.export, resolve_name(args), probability=args.probability)
+    out = render(args.export, resolve_name(args),
+                 probability=args.probability, source=args.source)
     print(out)
 
 
