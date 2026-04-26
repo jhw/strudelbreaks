@@ -136,10 +136,14 @@ Given N input cell-renders `inputs[0..N-1]`, each one bar long:
             ++ inputs[1].segment[k]
             ++ ...
             ++ inputs[N-1].segment[k]
+            ++ inputs[N-1].segment[k]   ← duplicate, see "Crossfader uniformity"
    ```
-   `chain[k]` length = N segments × `bar_ms / N` = 1 bar.
-3. Each chain gets exactly N equal slice markers (one per input
-   contribution); the slice durations are the segment duration.
+   `chain[k]` length = (N + 1) segments × `bar_ms / N` = `bar_ms ×
+   (N + 1) / N` (≈ 1.25× bar for N=4, 1.125× for N=8, 1.0625× for
+   N=16).
+3. Each chain gets exactly N + 1 equal slice markers (one per input
+   contribution plus the duplicate); the slice durations are the
+   segment duration.
 
 ### Step 4 — Bind chains to flex slots
 
@@ -177,15 +181,48 @@ patterns):
 
 Scenes (also part-scoped, shared by all the bank's patterns):
 
-- `scene(1).track(1).slice_index = 0`     (= input 0 across all chains)
-- `scene(2).track(1).slice_index = N - 1` (= input N-1 across all chains)
+- `scene(1).track(1).slice_index = 0` (= slice 0 = input 0)
+- `scene(2).track(1).slice_index = N` (= slice N = duplicate of input N-1)
 - `active_scene_a = 0; active_scene_b = 1`
 
-The crossfader interpolates `slice_index` from 0 to N-1; at any
-position `s` it picks slice `s` of every chain, which by chain
-construction is `inputs[s].segment[k]` at trig `k` — i.e. input `s`
-played in full, grid-aligned. Same fader sweep applies to every
-pattern in the bank because they all share part 1.
+The crossfader interpolates raw STRT from 0 (= scene A) to 2N (= scene
+B); at any fader position the live raw value picks a slice which by
+chain construction is `inputs[s].segment[k]` at trig `k`, where
+`s = floor(raw / 2)`. This means input `s` plays in full, grid-aligned,
+across the fader fraction `[s/N, (s+1)/N)`. Same fader sweep applies
+to every pattern in the bank because they all share part 1. See
+"Crossfader uniformity" below for why scene B sits at slice N rather
+than slice N-1.
+
+### Crossfader uniformity — why scene B = N, not N-1
+
+The Octatrack's STRT parameter is 0..127 (7-bit) but only addresses
+64 slices, so each slice spans 2 raw STRT values: slice 0 = raw 0,
+slice 1 = raw 2, ..., slice S = raw 2S. The live raw value while
+crossfading is `lerp(raw_A, raw_B, f)` for fader fraction `f`, and
+the played slice is `floor(raw_live / 2)`.
+
+For N inputs we want each to occupy a uniform 1/N-th of the fader —
+i.e. transitions at fader fractions 1/N, 2/N, ..., (N-1)/N. Given
+scene A = slice 0 (raw 0), what should scene B be?
+
+- **Scene B = slice N - 1 (raw 2(N-1))**: lerp covers `0 → 2(N-1)`,
+  crosses raw values 2, 4, ..., 2(N-1) — N-1 transitions across the
+  full fader. The last input only sounds at the rightmost fader
+  position (a single notch); the others are squeezed left.
+- **Scene B = slice N (raw 2N)**: lerp covers `0 → 2N`, crosses raw
+  values 2, 4, ..., 2(N-1) at fractions 1/N, 2/N, ..., (N-1)/N
+  exactly. Uniform.
+
+Slice N doesn't naturally exist (chain has N inputs), so
+`build_matrix_chain` appends one extra segment — a duplicate of
+`inputs[N-1].segment[k]` — and `set_equal_slices` writes N + 1
+markers. Scene B's `slice_index = N` then lands on real audio that
+sounds identical to slice N - 1, giving the right fader feel without
+requiring undocumented OT clamping behaviour.
+
+Cost: chain WAVs grow by `1/N` (~25% for N=4, ~12% for N=8, ~6% for
+N=16). Trade looks fine for any reasonable N.
 
 ## Audio dependencies
 

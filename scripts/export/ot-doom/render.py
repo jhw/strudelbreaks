@@ -14,13 +14,16 @@ row). The validator rejects mixed-`|C|` banks with a clear message.
 The cells of each row are the doom *inputs* (`|C|` ∈ {4, 8, 16}):
 each cell renders to a bar of audio, then `|C|` matrix chains are
 built where chain[k] is the k-th equal segment of every input
-concatenated. `|C|` flex slots per row hold the chains with `|C|`
-slice markers each. The pattern fires `|C|` trigs at intervals of
-16/`|C|`, each sample-locked to its chain. Part 1's scenes lock
-track 1's slice_index to 0 and `|C|`-1 — the crossfader interpolates
-between, walking the input axis: at any fader position s, every
-trig plays segment k of input s, so input s plays in full
-grid-aligned.
+concatenated, plus a duplicate of the last input's segment_k so the
+chain has `|C|+1` slices. `|C|` flex slots per row hold the chains
+with `|C|+1` slice markers each. The pattern fires `|C|` trigs at
+intervals of 16/`|C|`, each sample-locked to its chain. Part 1's
+scenes lock track 1's slice_index to 0 and `|C|` — the crossfader
+interpolates raw STRT 0 → 2`|C|`, putting each input in its own
+1/`|C|`-th of the fader. The duplicate slice is the right-edge
+landing slot for scene B; without it scene B would have to sit at
+slice `|C|`-1 and the last input would be squeezed into the rightmost
+notch only (see docs/export/ot-doom.md "Crossfader uniformity").
 
 Project flex pool is 128 slots. Total chain count = sum(`|C|` per
 row) and is validated up-front; the renderer fails with a clear
@@ -132,7 +135,11 @@ def _render_row_chains(
     bar_ms = len(input_audios[0])
     segment_ms = bar_ms / n
 
-    # Build N chains and bind each as a flex slot with N slice markers.
+    # Build N chains and bind each as a flex slot. Each chain holds
+    # N + 1 segments (last input's segment_k is duplicated, see
+    # build_matrix_chain) and so gets N + 1 slice markers — needed so
+    # scene B's slice_index = N is a valid landing slot. See
+    # docs/export/ot-doom.md "Crossfader uniformity" for the rationale.
     bank_render_dir.mkdir(parents=True, exist_ok=True)
     flex_slots = []
     for k in range(n):
@@ -141,7 +148,7 @@ def _render_row_chains(
                     / f'b{bank_num:02d}_p{pattern_num:02d}_chain{k:02d}.wav')
         export_wav(chain_seg, wav_path)
         slot = project.add_sample(str(wav_path.resolve()), slot_type='FLEX')
-        set_equal_slices(project, slot, n,
+        set_equal_slices(project, slot, n + 1,
                          segment_ms=segment_ms,
                          sample_rate=sample_rate)
         flex_slots.append(slot)
@@ -175,7 +182,7 @@ def render_bank(
     """Render up to PATTERNS_PER_BANK rows into one OT bank.
 
     All rows in the bank must share the same `|C|` — every pattern in
-    the bank shares part 1's scene config (`slice_index` 0 / `|C|`-1),
+    the bank shares part 1's scene config (`slice_index` 0 / `|C|`),
     which is `|C|`-dependent. Mixed-`|C|` banks fail loudly.
     """
     if not rows:
@@ -218,11 +225,16 @@ def render_bank(
     t1.configure_flex(pattern_slots[0][0])
     t1.setup.slice = SliceMode.ON
 
-    # Scenes drive the input axis. Scene A → input 0, Scene B → input
-    # |C|-1. All patterns in this bank inherit, which is why we
+    # Scenes drive the input axis. Scene A → slice 0 (input 0). Scene
+    # B → slice N (the duplicate of input N-1 added by
+    # build_matrix_chain). The lerp from raw STRT 0 → 2N puts each
+    # input in its own 1/N-th of the fader; without the +1 (i.e. with
+    # scene B = N-1) the last input would be squeezed into the
+    # rightmost notch only. See docs/export/ot-doom.md "Crossfader
+    # uniformity". All patterns in this bank inherit, which is why we
     # require shared |C| above.
     part.scene(1).track(1).slice_index = 0
-    part.scene(2).track(1).slice_index = n - 1
+    part.scene(2).track(1).slice_index = n
     part.active_scene_a = 0
     part.active_scene_b = 1
 

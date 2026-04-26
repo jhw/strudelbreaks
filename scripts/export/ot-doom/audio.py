@@ -104,12 +104,21 @@ def render_cell_audio(
 
 
 def build_matrix_chain(input_audios: List[AudioSegment], k: int, n: int) -> AudioSegment:
-    """Build chain[k] = segment_k of every input concatenated.
+    """Build chain[k] = segment_k of every input concatenated, with the
+    last input's segment duplicated.
 
     Each input is sliced into `n` equal segments; chain[k] picks the
-    k-th segment from every input. No fades — segment boundaries lie
-    inside whatever envelope `render_cell_audio` produced and any
-    extra here would just double-attenuate.
+    k-th segment from every input, then appends one extra copy of the
+    last input's segment_k to give the chain `n + 1` slices. The duplicate
+    is the crossfader-uniformity fix: scene B locks `slice_index = n`
+    (raw STRT 2n) so the lerp `0 → 2n` puts each input in its own
+    1/n-th of the fader. Without it, scene B would have to lock to
+    slice n-1 and the last input would be squeezed into a single notch
+    at the right edge. See docs/export/ot-doom.md "Crossfader uniformity".
+
+    No fades — segment boundaries lie inside whatever envelope
+    `render_cell_audio` produced and any extra here would just
+    double-attenuate.
     """
     bar_ms = len(input_audios[0])
     seg_ms = bar_ms / n
@@ -118,6 +127,8 @@ def build_matrix_chain(input_audios: List[AudioSegment], k: int, n: int) -> Audi
     out = AudioSegment.empty()
     for inp in input_audios:
         out += inp[start_ms:end_ms]
+    # Duplicate the last input's segment so the chain has n+1 slices.
+    out += input_audios[-1][start_ms:end_ms]
     return out
 
 

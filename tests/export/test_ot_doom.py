@@ -98,17 +98,44 @@ class OtDoomAudioHelpersTest(unittest.TestCase):
         self.assertEqual(len(bar), 8 * slice_ms)
         self.assertEqual(bar.frame_rate, rate)
 
-    def test_build_matrix_chain_length_equals_one_bar(self):
+    def test_build_matrix_chain_length_is_one_bar_plus_one_segment(self):
         from pydub import AudioSegment
 
         rate = 44100
         bar_ms = 1600
-        # 4 inputs, each 1600 ms long. The chain (segment k from each
-        # input) has length n × (bar_ms / n) = bar_ms = 1 bar.
-        inputs = [AudioSegment.silent(duration=bar_ms, frame_rate=rate) for _ in range(4)]
-        chain0 = self.audio.build_matrix_chain(inputs, k=0, n=4)
-        self.assertEqual(len(chain0), bar_ms)
+        # 4 inputs, each 1600 ms long. The chain holds segment k from
+        # every input *plus* a duplicate of the last input's segment k —
+        # n + 1 segments total, each `bar_ms / n` long. So the chain is
+        # `bar_ms * (n + 1) / n` (= 5/4 of a bar for n=4). The duplicate
+        # is the right-edge slot for scene B's slice_index = n; see
+        # docs/export/ot-doom.md "Crossfader uniformity".
+        n = 4
+        inputs = [AudioSegment.silent(duration=bar_ms, frame_rate=rate) for _ in range(n)]
+        chain0 = self.audio.build_matrix_chain(inputs, k=0, n=n)
+        self.assertEqual(len(chain0), bar_ms * (n + 1) // n)
         self.assertEqual(chain0.frame_rate, rate)
+
+    def test_build_matrix_chain_duplicates_last_input_segment(self):
+        # The trailing segment must be a copy of the *last* input's
+        # segment k, not silence or some other input's segment. Use
+        # distinguishable per-input audio (sine tones at different
+        # frequencies) and check the chain's last-segment raw bytes
+        # equal input N-1's segment-k raw bytes.
+        from pydub.generators import Sine
+
+        rate = 44100
+        bar_ms = 400  # short for test speed
+        n = 4
+        inputs = [
+            Sine(220 * (i + 1), sample_rate=rate).to_audio_segment(duration=bar_ms)
+            for i in range(n)
+        ]
+        chain0 = self.audio.build_matrix_chain(inputs, k=0, n=n)
+        seg_ms = bar_ms // n
+        # Slice N (duplicate slot) starts at offset n * seg_ms.
+        last_seg = chain0[n * seg_ms:(n + 1) * seg_ms]
+        input_n_minus_1_seg = inputs[-1][:seg_ms]
+        self.assertEqual(last_seg.raw_data, input_n_minus_1_seg.raw_data)
 
 
 class OtDoomCellCountValidationTest(unittest.TestCase):
@@ -282,12 +309,13 @@ class OtDoomRoundtripTest(unittest.TestCase):
 
             project = Project.from_zip(zip_path)
 
-            # Each chain → one flex slot with |C|=4 slice markers.
+            # Each chain → one flex slot with |C|+1 = 5 slice markers
+            # (the trailing duplicate slot for scene B's slice_index = N).
             for k in range(4):
                 slot = project.get_slot(f'b01_p01_chain{k:02d}.wav')
                 self.assertIsNotNone(slot, f'missing chain {k} slot')
                 sm = project.markers.get_slot(slot, is_static=False)
-                self.assertEqual(sm.slice_count, 4)
+                self.assertEqual(sm.slice_count, 5)
             self.assertIsNone(project.get_slot('b01_p01_chain04.wav'))
 
             bank = project.bank(1)
@@ -298,9 +326,12 @@ class OtDoomRoundtripTest(unittest.TestCase):
             self.assertEqual(int(t1.setup.slice), 1)
 
             # Scenes drive the input axis via slice_index (octapy 0.1.23
-            # API). No raw playback_param2 STRT manipulation.
+            # API). Scene A → slice 0 (input 0). Scene B → slice N (the
+            # duplicate of input N-1) so the lerp covers raw STRT 0 → 2N
+            # and each input gets its own 1/N-th of the fader. See
+            # docs/export/ot-doom.md "Crossfader uniformity".
             self.assertEqual(part.scene(1).track(1).slice_index, 0)
-            self.assertEqual(part.scene(2).track(1).slice_index, 3)
+            self.assertEqual(part.scene(2).track(1).slice_index, 4)
             self.assertEqual(part.active_scene_a, 0)
             self.assertEqual(part.active_scene_b, 1)
 
