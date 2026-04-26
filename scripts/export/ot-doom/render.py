@@ -2,16 +2,29 @@
 """Render a tempera captures JSON export into an Octatrack megabreak-of-doom
 project zip — cell-input variant.
 
-Each non-empty row of the captures becomes one OT bank with one part and
-one 16-step pattern on track 1. The cells of the row are the doom
-*inputs* (must be 4, 8, or 16): each cell renders to a bar of audio,
-then N matrix chains are built where chain[k] is the k-th equal segment
-of every input concatenated. N flex slots receive the chains with N
-slice markers each. The pattern fires N trigs at intervals of 16/N,
-each sample-locked to its chain. Scenes lock track 1's slice_index to
-0 and N-1 — the crossfader interpolates between, walking the input
-axis: at any fader position s, every trig plays segment k of input s,
-so input s plays in full grid-aligned.
+Each non-empty row of the captures becomes one OT pattern. Patterns
+are packed 16 per bank: rows 1..16 → bank 1 patterns 1..16, rows
+17..32 → bank 2 patterns 1..16, etc. Tempera-realistic exports are
+small enough that one bank usually suffices.
+
+Within a bank every pattern shares part 1 — and therefore the part's
+scenes — so every row in a bank must have the same `|C|` (cells per
+row). The validator rejects mixed-`|C|` banks with a clear message.
+
+The cells of each row are the doom *inputs* (`|C|` ∈ {4, 8, 16}):
+each cell renders to a bar of audio, then `|C|` matrix chains are
+built where chain[k] is the k-th equal segment of every input
+concatenated. `|C|` flex slots per row hold the chains with `|C|`
+slice markers each. The pattern fires `|C|` trigs at intervals of
+16/`|C|`, each sample-locked to its chain. Part 1's scenes lock
+track 1's slice_index to 0 and `|C|`-1 — the crossfader interpolates
+between, walking the input axis: at any fader position s, every
+trig plays segment k of input s, so input s plays in full
+grid-aligned.
+
+Project flex pool is 128 slots. Total chain count = sum(`|C|` per
+row) and is validated up-front; the renderer fails with a clear
+message if it would overflow.
 
 This differs from the forum-canonical megabreak (which crossfades
 between source breaks rather than between captured patterns). See
@@ -57,6 +70,10 @@ N_SLICES = 16
 N_PATTERN_STEPS = 16          # 1 bar at 1/16 — one Strudel cycle.
 ALLOWED_INPUT_COUNTS = (4, 8, 16)
 
+PATTERNS_PER_BANK = 16        # OT bank capacity.
+MAX_BANKS = 16                # OT project capacity.
+FLEX_SLOT_LIMIT = 128         # OT project-wide flex pool.
+
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 OUTPUT_DIR = REPO_ROOT / 'tmp' / 'ot-doom'
@@ -79,21 +96,21 @@ def set_equal_slices(project, slot, n_slices, segment_ms, sample_rate):
     project.markers.set_slot(slot, slot_markers, is_static=False)
 
 
-def render_row(
+def _render_row_chains(
     project,
-    bank_idx,
+    bank_num,
+    pattern_num,
     cells,
     events_per_cycle,
     source_slice_cache,
-    row_render_dir,
+    bank_render_dir,
 ):
-    """Render one tempera row into one OT bank/pattern via matrix chains."""
+    """Render a row's audio, write chain WAVs, register flex slots.
+
+    Returns (flex_slots, sample_rate). Caller wires the slots into the
+    pattern's trigs and the part's scenes.
+    """
     n = len(cells)
-    if n not in ALLOWED_INPUT_COUNTS:
-        sys.exit(
-            f'row {bank_idx + 1}: |C|={n} cells (allowed {sorted(ALLOWED_INPUT_COUNTS)}) — '
-            f'add or remove cells in tempera so each row has 4, 8, or 16'
-        )
 
     # Load source slices for every break referenced in this row, lazily.
     for cell in cells:
@@ -116,11 +133,12 @@ def render_row(
     segment_ms = bar_ms / n
 
     # Build N chains and bind each as a flex slot with N slice markers.
-    row_render_dir.mkdir(parents=True, exist_ok=True)
+    bank_render_dir.mkdir(parents=True, exist_ok=True)
     flex_slots = []
     for k in range(n):
         chain_seg = build_matrix_chain(input_audios, k, n)
-        wav_path = row_render_dir / f'b{bank_idx + 1:02d}_chain{k:02d}.wav'
+        wav_path = (bank_render_dir
+                    / f'b{bank_num:02d}_p{pattern_num:02d}_chain{k:02d}.wav')
         export_wav(chain_seg, wav_path)
         slot = project.add_sample(str(wav_path.resolve()), slot_type='FLEX')
         set_equal_slices(project, slot, n,
@@ -128,26 +146,15 @@ def render_row(
                          sample_rate=sample_rate)
         flex_slots.append(slot)
 
-    # Bank/Part/Track 1 — flex, slice mode on. Default slot = chain 0
-    # so that with no scene blending the first input plays through.
-    bank = project.bank(bank_idx + 1)
-    part = bank.part(1)
-    t1 = part.audio_track(1)
-    t1.configure_flex(flex_slots[0])
-    t1.setup.slice = SliceMode.ON
+    return flex_slots
 
-    # Scenes drive the input axis. Scene A → input 0, Scene B → input N-1.
-    # No per-trig slice_index lock; trigs inherit from the active scene.
-    part.scene(1).track(1).slice_index = 0
-    part.scene(2).track(1).slice_index = n - 1
-    part.active_scene_a = 0
-    part.active_scene_b = 1
 
-    # Pattern — N trigs spaced at 16/N steps, each sample-locked to its
-    # chain. The interval is exact only when n divides 16 (= the
-    # ALLOWED_INPUT_COUNTS guarantee).
+def _configure_pattern(bank, pattern_num, flex_slots, n):
+    """Write a single pattern: N trigs at 16/N spacing, each
+    sample-locked to its chain. No per-trig slice_index lock — trigs
+    inherit from the active scene on the part."""
     interval = N_PATTERN_STEPS // n
-    pattern = bank.pattern(1)
+    pattern = bank.pattern(pattern_num)
     pattern.scale_length = N_PATTERN_STEPS
     track = pattern.audio_track(1)
     active_steps = [k * interval + 1 for k in range(n)]
@@ -155,6 +162,73 @@ def render_row(
     for k, step_num in enumerate(active_steps):
         step = track.step(step_num)
         step.sample_lock = flex_slots[k]
+
+
+def render_bank(
+    project,
+    bank_num,
+    rows,
+    events_per_cycle,
+    source_slice_cache,
+    bank_render_dir,
+):
+    """Render up to PATTERNS_PER_BANK rows into one OT bank.
+
+    All rows in the bank must share the same `|C|` — every pattern in
+    the bank shares part 1's scene config (`slice_index` 0 / `|C|`-1),
+    which is `|C|`-dependent. Mixed-`|C|` banks fail loudly.
+    """
+    if not rows:
+        return
+    if len(rows) > PATTERNS_PER_BANK:
+        sys.exit(f'bank {bank_num}: {len(rows)} rows exceeds {PATTERNS_PER_BANK}')
+
+    cs = [len(cells) for cells in rows]
+    n = cs[0]
+    if n not in ALLOWED_INPUT_COUNTS:
+        sys.exit(
+            f'bank {bank_num}, row 1: |C|={n} cells '
+            f'(allowed {sorted(ALLOWED_INPUT_COUNTS)}) — '
+            f'add or remove cells in tempera so each row has 4, 8, or 16'
+        )
+    if any(c != n for c in cs):
+        bad = [(i + 1, c) for i, c in enumerate(cs) if c != n]
+        sys.exit(
+            f'bank {bank_num}: mixed |C| within bank '
+            f'(row 1 has |C|={n}, conflicts: {bad}) — '
+            f'all rows in a bank must share the same cell count because '
+            f'they share part 1\'s scene config (slice_index 0 / |C|-1)'
+        )
+
+    # Render each row's chains and capture the per-pattern slot list.
+    pattern_slots = []
+    for pattern_idx, cells in enumerate(rows):
+        slots = _render_row_chains(
+            project, bank_num, pattern_idx + 1, cells,
+            events_per_cycle, source_slice_cache, bank_render_dir,
+        )
+        pattern_slots.append(slots)
+
+    # Configure part 1 once for the whole bank. Default flex slot is
+    # the first chain of the first pattern — only used when a step has
+    # no sample_lock, which never happens in our patterns.
+    bank = project.bank(bank_num)
+    part = bank.part(1)
+    t1 = part.audio_track(1)
+    t1.configure_flex(pattern_slots[0][0])
+    t1.setup.slice = SliceMode.ON
+
+    # Scenes drive the input axis. Scene A → input 0, Scene B → input
+    # |C|-1. All patterns in this bank inherit, which is why we
+    # require shared |C| above.
+    part.scene(1).track(1).slice_index = 0
+    part.scene(2).track(1).slice_index = n - 1
+    part.active_scene_a = 0
+    part.active_scene_b = 1
+
+    # Write each pattern with its own chain trigs.
+    for pattern_idx, slots in enumerate(pattern_slots):
+        _configure_pattern(bank, pattern_idx + 1, slots, n)
 
 
 def build_project(export_path, name, source='json'):
@@ -165,8 +239,23 @@ def build_project(export_path, name, source='json'):
     rows_in = [b for b in (payload.get('banks') or []) if b]
     if not rows_in:
         sys.exit('no non-empty rows in export')
-    if len(rows_in) > 16:
-        sys.exit(f'too many rows: {len(rows_in)} > 16')
+
+    max_rows = MAX_BANKS * PATTERNS_PER_BANK
+    if len(rows_in) > max_rows:
+        sys.exit(
+            f'too many rows: {len(rows_in)} > {max_rows} '
+            f'({MAX_BANKS} banks × {PATTERNS_PER_BANK} patterns)'
+        )
+
+    # Total chain slots over the whole project. The OT flex pool is
+    # shared across banks, so this is a project-wide ceiling.
+    total_slots = sum(len(cells) for cells in rows_in)
+    if total_slots > FLEX_SLOT_LIMIT:
+        sys.exit(
+            f'flex slot limit exceeded: {total_slots} chains '
+            f'(sum of |C| across {len(rows_in)} rows) > {FLEX_SLOT_LIMIT} '
+            f'(OT project flex pool). Drop rows or use rows with smaller |C|.'
+        )
 
     all_names = sorted({
         break_name
@@ -189,7 +278,7 @@ def build_project(export_path, name, source='json'):
     project.master_track = True
 
     # Source-slice cache shared across rows. The path map lives under a
-    # reserved key so render_row can lazy-load on first reference per
+    # reserved key so render_bank can lazy-load on first reference per
     # row without changing the function signature.
     source_slice_cache = {'__paths__': paths}
 
@@ -199,14 +288,18 @@ def build_project(export_path, name, source='json'):
             if p.is_file():
                 p.unlink()
 
-    for bank_idx, cells in enumerate(rows_in):
-        render_row(
+    # Pack rows sequentially: rows 1..16 → bank 1, rows 17..32 → bank
+    # 2, etc. Same-|C|-per-bank validation happens inside render_bank.
+    for bank_idx in range(0, len(rows_in), PATTERNS_PER_BANK):
+        bank_num = (bank_idx // PATTERNS_PER_BANK) + 1
+        bank_rows = rows_in[bank_idx:bank_idx + PATTERNS_PER_BANK]
+        render_bank(
             project,
-            bank_idx,
-            cells,
+            bank_num,
+            bank_rows,
             ctx['eventsPerCycle'],
             source_slice_cache,
-            row_render_root / f'bank{bank_idx + 1:02d}',
+            row_render_root / f'bank{bank_num:02d}',
         )
 
     return project
