@@ -184,6 +184,53 @@ The `@main` ref + `?_=${Date.now()}` query param keeps the consumer on
 the latest commit and busts jsDelivr's cache on every eval. Dev mode —
 no version pinning.
 
+## Export targets
+
+Tempera (`tempera.strudel.js`) persists captures to `localStorage` and
+exports them as a JSON payload. `scripts/export/` turns that payload
+into device-specific formats:
+
+| Target | Output | Doc |
+|---|---|---|
+| `octatrack/` | OT project zip — one bank per row, one pattern per cell | [docs/export/octatrack.md](docs/export/octatrack.md) |
+| `ot-doom/` | OT project zip — megabreak-of-doom matrix chains | [docs/export/ot-doom.md](docs/export/ot-doom.md) |
+| `torso-s4/` | Torso S-4 sample bundle — one WAV per row | [docs/export/torso-s4.md](docs/export/torso-s4.md) |
+| `strudel/` | Standalone `.strudel.js` playback template | [docs/export/strudel.md](docs/export/strudel.md) |
+
+Common shape:
+
+```
+python scripts/export/<target>/render.py <export.json> [--name NAME] [--seed N] [--source {json,wav}]
+```
+
+### Source mode (`--source`, audio targets only)
+
+The Strudel sample gist now publishes both `name.wav` (the
+breakbeat) and `name.json` (a [beatwav](https://github.com/jhw/beatwav)
+pattern that re-synthesises the breakbeat from one-shot drum samples).
+Pick the source per export:
+
+- **`json`** (default) — fetch each break's beatwav JSON, render to
+  WAV at the captures' BPM and the device's native sample rate
+  (44.1 kHz for OT, 96 kHz for S-4). Tempo is correct by
+  construction; no resample-on-load; closes the OT's latent
+  48-kHz-source drift hole.
+- **`wav`** — bundle the gist's WAVs as-is. Necessary for older
+  WAV-only gists; per-break fallback when JSON mode finds no sibling
+  JSON.
+
+JSON mode pulls one-shots from the `wol-samplebank` S3 bucket
+(`s3://wol-samplebank/samples/`) and mirrors them to `tmp/oneshots/`
+on first use via `aws s3 sync` — needs AWS credentials with read on
+the bucket. The shared resolver, cache layout, and fallback rules
+live in `scripts/export/common/sample_source.py`. Per-device sample
+rates live in `scripts/export/common/devices.py`.
+
+The `strudel/` target is a JS template generator, not an audio
+renderer — it has no `--source` flag. The generated `.strudel.js`
+loads WAVs at runtime via `samples(gistUrl)`, exactly like
+`tempera.strudel.js`.
+
 ## Tests
 
 JS library — `node:test`, zero deps, runs under Node 18+:
