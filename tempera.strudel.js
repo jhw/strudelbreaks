@@ -6,7 +6,7 @@
 
 // ===== CONFIG =====
 const gistUser = 'jhw';
-const gistId = 'cde852d3c3a0054b80c13de00e057e88';
+const gistId = 'b39b2cd8b216d2e219c0c932b76e3cf7';
 const gistUrl = 'https://gist.githubusercontent.com/' + gistUser + '/' + gistId + '/raw/strudel.json';
 
 const BPM = 128;
