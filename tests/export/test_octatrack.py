@@ -1,9 +1,9 @@
-"""Tests for the octatrack renderer (per-cell patterns target)."""
+"""Tests for the ot-basic renderer (per-cell patterns target, per-track stems)."""
 from __future__ import annotations
 
 import unittest
 
-from octapy import Project, TrigCondition
+from octapy import FX1Type, FX2Type, Project, TrigCondition
 
 from ._fixtures import (
     WorkDir,
@@ -11,6 +11,7 @@ from ._fixtures import (
     make_break_wavs,
     make_capture_cell,
     make_export,
+    make_per_track_break_wavs,
 )
 
 
@@ -84,12 +85,16 @@ class OctatrackProbabilitySnapTest(unittest.TestCase):
 
 class OctatrackRoundtripTest(unittest.TestCase):
     EXPECTED_ACTIVE = [1, 3, 5, 9, 11, 13, 15]
+    TRACKS = ('kick', 'snare', 'hat')
 
     def _render(self, probability=1.0):
         render = load_render_module('octatrack/ot-basic')
         wd = WorkDir().__enter__()
         try:
-            paths = make_break_wavs(wd.samples, ['kk', 'sn'], bpm=120, steps=32)
+            paths = make_per_track_break_wavs(
+                wd.samples, ['kk', 'sn'], tracks=self.TRACKS,
+                bpm=120, steps=32,
+            )
             wd.stub_sources(paths)
             payload = make_export([[
                 make_capture_cell(['kk', 'sn', 'kk', 'sn'],
@@ -104,36 +109,69 @@ class OctatrackRoundtripTest(unittest.TestCase):
             wd.__exit__(None, None, None)
             raise
 
-    def test_render_produces_valid_project_with_expected_trigs(self):
+    def test_render_produces_per_track_slots_and_trigs(self):
         zip_path, wd = self._render(probability=1.0)
         try:
             self.assertTrue(zip_path.exists())
 
             project = Project.from_zip(zip_path)
-            kk_slot = project.get_slot('kk.wav', slot_type='FLEX')
-            sn_slot = project.get_slot('sn.wav', slot_type='FLEX')
-            self.assertIsNotNone(kk_slot)
-            self.assertIsNotNone(sn_slot)
 
-            for slot in (kk_slot, sn_slot):
-                sm = project.markers.get_slot(slot, is_static=False)
-                self.assertEqual(sm.slice_count, 16)
+            # Each break gets one flex slot per drum stem (kick, snare,
+            # hat) — so 2 breaks × 3 stems = 6 flex slots total, each
+            # with the canonical 16 slice markers.
+            slots = {}
+            for name in ('kk', 'sn'):
+                for track in self.TRACKS:
+                    slot = project.get_slot(f'{name}__{track}.wav', slot_type='FLEX')
+                    self.assertIsNotNone(slot, f'missing {name}/{track} slot')
+                    sm = project.markers.get_slot(slot, is_static=False)
+                    self.assertEqual(sm.slice_count, 16)
+                    slots[(name, track)] = slot
 
             pattern = project.bank(1).pattern(1)
             self.assertEqual(pattern.scale_length, 16)
-            track = pattern.audio_track(1)
 
-            # eventsPerCycle=8 events → trigs at OT steps 1,3,5,7,9,11,13,15.
-            # Step 7 (events index 3) is a rest → no trig there.
-            self.assertEqual(track.active_steps, self.EXPECTED_ACTIVE)
+            # Same trig pattern on T1 (kick), T2 (snare), T3 (hat).
+            # Each track sample-locks to its own stem's slot, slice_index
+            # is identical across the three tracks at any given step.
+            for track_idx, track in enumerate(self.TRACKS):
+                track_obj = pattern.audio_track(track_idx + 1)
+                self.assertEqual(
+                    track_obj.active_steps, self.EXPECTED_ACTIVE,
+                    f'track {track} active steps wrong',
+                )
 
-            # First event maps to break 'kk' slot, slice 0.
-            self.assertEqual(track.step(1).sample_lock, kk_slot)
-            self.assertEqual(track.step(1).slice_index, 0)
-            # Polymetric stretch: events 4,5 map to break index 2 = 'kk'
-            # again; pattern indices were 4 (event 1) and 1 (event 4).
-            self.assertEqual(track.step(9).sample_lock, kk_slot)
-            self.assertEqual(track.step(9).slice_index, 1)
+                # First event maps to break 'kk', this stem.
+                self.assertEqual(track_obj.step(1).sample_lock,
+                                 slots[('kk', track)])
+                self.assertEqual(track_obj.step(1).slice_index, 0)
+                # Polymetric stretch: events 4,5 map to break index 2 = 'kk'.
+                self.assertEqual(track_obj.step(9).sample_lock,
+                                 slots[('kk', track)])
+                self.assertEqual(track_obj.step(9).slice_index, 1)
+        finally:
+            wd.__exit__(None, None, None)
+
+    def test_part_fx_layout(self):
+        zip_path, wd = self._render(probability=1.0)
+        try:
+            project = Project.from_zip(zip_path)
+            part = project.bank(1).part(1)
+
+            # T1, T2, T3: DJ_EQ on FX1, COMPRESSOR on FX2.
+            for track_idx in range(3):
+                t = part.audio_track(track_idx + 1)
+                self.assertEqual(t.fx1_type, FX1Type.DJ_EQ)
+                self.assertEqual(t.fx2_type, FX2Type.COMPRESSOR)
+
+            # T8: CHORUS (FX1) at mix=64 and DELAY (FX2) at send=64.
+            # Different param names because the two FX expose
+            # different wet/dry parameters in octapy.
+            t8 = part.audio_track(8)
+            self.assertEqual(t8.fx1_type, FX1Type.CHORUS)
+            self.assertEqual(t8.fx1.mix, 64)
+            self.assertEqual(t8.fx2_type, FX2Type.DELAY)
+            self.assertEqual(t8.fx2.send, 64)
         finally:
             wd.__exit__(None, None, None)
 
@@ -141,29 +179,33 @@ class OctatrackRoundtripTest(unittest.TestCase):
         zip_path, wd = self._render(probability=1.0)
         try:
             project = Project.from_zip(zip_path)
-            track = project.bank(1).pattern(1).audio_track(1)
-            for s in self.EXPECTED_ACTIVE:
-                cond = track.step(s).condition
-                # Default OT trig condition value (no override) is NONE.
-                self.assertIn(cond, (None, TrigCondition.NONE))
+            for track_idx in range(3):
+                track = project.bank(1).pattern(1).audio_track(track_idx + 1)
+                for s in self.EXPECTED_ACTIVE:
+                    cond = track.step(s).condition
+                    # Default OT trig condition value (no override) is NONE.
+                    self.assertIn(cond, (None, TrigCondition.NONE))
         finally:
             wd.__exit__(None, None, None)
 
-    def test_custom_probability_locks_every_trig(self):
+    def test_custom_probability_locks_every_trig_on_all_tracks(self):
         zip_path, wd = self._render(probability=0.5)
         try:
             project = Project.from_zip(zip_path)
-            track = project.bank(1).pattern(1).audio_track(1)
-            for s in self.EXPECTED_ACTIVE:
-                self.assertEqual(track.step(s).condition,
-                                 TrigCondition.PERCENT_50)
+            for track_idx in range(3):
+                track = project.bank(1).pattern(1).audio_track(track_idx + 1)
+                for s in self.EXPECTED_ACTIVE:
+                    self.assertEqual(track.step(s).condition,
+                                     TrigCondition.PERCENT_50)
         finally:
             wd.__exit__(None, None, None)
 
     def test_invalid_probability_raises(self):
         render = load_render_module('octatrack/ot-basic')
         with WorkDir() as wd:
-            paths = make_break_wavs(wd.samples, ['kk'], bpm=120, steps=32)
+            paths = make_per_track_break_wavs(
+                wd.samples, ['kk'], tracks=self.TRACKS, bpm=120, steps=32,
+            )
             wd.stub_sources(paths)
             payload = make_export([[
                 make_capture_cell(['kk'], [0, 1, 2, 3, 4, 5, 6, 7]),

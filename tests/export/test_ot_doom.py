@@ -1,15 +1,18 @@
-"""Tests for the ot-doom (megabreak of doom) renderer — cell-input variant.
+"""Tests for the ot-doom (megabreak of doom) renderer — per-track stems.
 
 Each tempera row → one OT pattern. Patterns pack 16 per bank: rows
 1..16 → bank 1 patterns 1..16, rows 17..32 → bank 2 patterns 1..16,
-etc. All patterns in a bank share part 1's scene config so all rows
-in a bank must share the same `|C|`.
+etc. All patterns in a bank share part 1's per-track scene config,
+so all rows in a bank must share the same `|C|`.
 
-Per pattern: each cell renders to a bar of audio in Python;
-chain[k] = segment_k(input_0) ++ … ++ segment_k(input_{N-1}). N flex
-slots, N trigs at intervals of 16/N; scenes lock track 1's
-slice_index to 0 / N-1 on part 1; no per-trig slice_index p-lock.
-See docs/export/ot-doom.md for the full design.
+Per pattern: each cell renders to a bar of audio per drum stem (kick,
+snare, hat) in Python; chain[k] = stack across stems of
+(segment_k(input_0) ++ … ++ segment_k(input_{N-1}) ++ duplicate).
+N flex slots per pattern, each holding `3 * (N + 1)` slices. N trigs
+on each of T1/T2/T3 at intervals of 16/N, sample-locked to the same
+packed slot per chain position. Per-track scenes on part 1 address
+each stem's slice range. See docs/export/ot-doom.md for the full
+design.
 """
 from __future__ import annotations
 
@@ -18,16 +21,19 @@ import sys
 import unittest
 import wave
 
-from octapy import Project
+from octapy import FX1Type, FX2Type, Project
 
 from ._fixtures import (
     EXPORT_ROOT,
     WorkDir,
     load_render_module,
-    make_break_wavs,
     make_capture_cell,
     make_export,
+    make_per_track_break_wavs,
 )
+
+
+TRACKS = ('kick', 'snare', 'hat')
 
 
 def _load_audio_module():
@@ -77,7 +83,9 @@ class OtDoomAudioHelpersTest(unittest.TestCase):
     def test_render_cell_audio_polymetric_stretch(self):
         # Build a synthetic cache: two breaks, 16 distinct slices each.
         # The render walks break_names polymetrically (i*M//N) and plays
-        # the captured slice index per event.
+        # the captured slice index per event. render_cell_audio is
+        # per-stem in the new design — caller invokes it per drum track
+        # with that track's source-slice cache.
         from pydub import AudioSegment
 
         slice_ms = 100
@@ -99,44 +107,91 @@ class OtDoomAudioHelpersTest(unittest.TestCase):
         self.assertEqual(len(bar), 8 * slice_ms)
         self.assertEqual(bar.frame_rate, rate)
 
-    def test_build_matrix_chain_length_is_one_bar_plus_one_segment(self):
+    def test_build_matrix_chain_packs_three_stems(self):
+        # Per-track packing: kick, snare, hat each contribute n+1 slices
+        # to one packed chain. For n=4 inputs across 3 stems, total
+        # slices per packed chain = 3 * 5 = 15. Each input is 1600 ms,
+        # seg_ms = 400, packed length = 15 * 400 = 6000 ms.
         from pydub import AudioSegment
 
         rate = 44100
         bar_ms = 1600
-        # 4 inputs, each 1600 ms long. The chain holds segment k from
-        # every input *plus* a duplicate of the last input's segment k —
-        # n + 1 segments total, each `bar_ms / n` long. So the chain is
-        # `bar_ms * (n + 1) / n` (= 5/4 of a bar for n=4). The duplicate
-        # is the right-edge slot for scene B's slice_index = n; see
-        # docs/export/ot-doom.md "Crossfader uniformity".
         n = 4
-        inputs = [AudioSegment.silent(duration=bar_ms, frame_rate=rate) for _ in range(n)]
-        chain0 = self.audio.build_matrix_chain(inputs, k=0, n=n)
-        self.assertEqual(len(chain0), bar_ms * (n + 1) // n)
+        per_track_inputs = {
+            t: [AudioSegment.silent(duration=bar_ms, frame_rate=rate)
+                for _ in range(n)]
+            for t in TRACKS
+        }
+        chain0 = self.audio.build_matrix_chain(
+            per_track_inputs, list(TRACKS), k=0, n=n,
+        )
+        # 3 stems × (n + 1) segments × bar_ms / n = packed length.
+        expected_ms = len(TRACKS) * (n + 1) * (bar_ms // n)
+        self.assertEqual(len(chain0), expected_ms)
         self.assertEqual(chain0.frame_rate, rate)
 
-    def test_build_matrix_chain_duplicates_last_input_segment(self):
-        # The trailing segment must be a copy of the *last* input's
-        # segment k, not silence or some other input's segment. Use
-        # distinguishable per-input audio (sine tones at different
-        # frequencies) and check the chain's last-segment raw bytes
-        # equal input N-1's segment-k raw bytes.
+    def test_build_matrix_chain_stem_ordering(self):
+        # The packed chain orders stems as TRACKS = (kick, snare, hat).
+        # Each stem block is `n+1` slices long, and block boundaries
+        # land at multiples of seg_ms. Use distinct sine tones per stem
+        # so we can verify the bytes at each block start match the
+        # right stem's first input segment.
         from pydub.generators import Sine
 
         rate = 44100
-        bar_ms = 400  # short for test speed
+        bar_ms = 400
         n = 4
-        inputs = [
-            Sine(220 * (i + 1), sample_rate=rate).to_audio_segment(duration=bar_ms)
-            for i in range(n)
-        ]
-        chain0 = self.audio.build_matrix_chain(inputs, k=0, n=n)
         seg_ms = bar_ms // n
-        # Slice N (duplicate slot) starts at offset n * seg_ms.
-        last_seg = chain0[n * seg_ms:(n + 1) * seg_ms]
-        input_n_minus_1_seg = inputs[-1][:seg_ms]
-        self.assertEqual(last_seg.raw_data, input_n_minus_1_seg.raw_data)
+        per_track_inputs = {}
+        for j, track in enumerate(TRACKS):
+            per_track_inputs[track] = [
+                Sine(220 * (j + 1) * (i + 1), sample_rate=rate)
+                .to_audio_segment(duration=bar_ms)
+                for i in range(n)
+            ]
+        chain0 = self.audio.build_matrix_chain(
+            per_track_inputs, list(TRACKS), k=0, n=n,
+        )
+        block = (n + 1) * seg_ms
+        # The first slice of each block should be input_0.segment_0
+        # for that track.
+        for j, track in enumerate(TRACKS):
+            packed_first = chain0[j * block:j * block + seg_ms]
+            track_first = per_track_inputs[track][0][:seg_ms]
+            self.assertEqual(
+                packed_first.raw_data, track_first.raw_data,
+                f'block {j} ({track}) does not start with that stem',
+            )
+
+    def test_build_matrix_chain_duplicates_last_input_per_stem(self):
+        # Each stem's block ends with a duplicate of that stem's
+        # input_{n-1}.segment_k — the crossfader-uniformity slot
+        # for scene B = stem-block-end. Verify per-stem.
+        from pydub.generators import Sine
+
+        rate = 44100
+        bar_ms = 400
+        n = 4
+        seg_ms = bar_ms // n
+        per_track_inputs = {}
+        for j, track in enumerate(TRACKS):
+            per_track_inputs[track] = [
+                Sine(220 * (j + 1) * (i + 1), sample_rate=rate)
+                .to_audio_segment(duration=bar_ms)
+                for i in range(n)
+            ]
+        chain0 = self.audio.build_matrix_chain(
+            per_track_inputs, list(TRACKS), k=0, n=n,
+        )
+        block = (n + 1) * seg_ms
+        for j, track in enumerate(TRACKS):
+            duplicate_offset = j * block + n * seg_ms
+            duplicate = chain0[duplicate_offset:duplicate_offset + seg_ms]
+            expected = per_track_inputs[track][-1][:seg_ms]
+            self.assertEqual(
+                duplicate.raw_data, expected.raw_data,
+                f'stem {track} duplicate slot is not a copy of input n-1',
+            )
 
 
 class OtDoomCellCountValidationTest(unittest.TestCase):
@@ -144,7 +199,9 @@ class OtDoomCellCountValidationTest(unittest.TestCase):
 
     def _build_render(self, n_cells, wd):
         render = load_render_module('octatrack/ot-doom')
-        paths = make_break_wavs(wd.samples, ['a', 'b'], bpm=120)
+        paths = make_per_track_break_wavs(
+            wd.samples, ['a', 'b'], tracks=TRACKS, bpm=120,
+        )
         wd.stub_sources(paths)
         payload = make_export([_make_cells(n_cells)])
         wd.write_export(payload)
@@ -190,7 +247,9 @@ class OtDoomBankPackingTest(unittest.TestCase):
 
     def _setup_render(self, wd, rows):
         render = load_render_module('octatrack/ot-doom')
-        paths = make_break_wavs(wd.samples, ['a', 'b'], bpm=120, steps=32)
+        paths = make_per_track_break_wavs(
+            wd.samples, ['a', 'b'], tracks=TRACKS, bpm=120, steps=32,
+        )
         wd.stub_sources(paths)
         payload = make_export(rows)
         wd.write_export(payload)
@@ -199,8 +258,7 @@ class OtDoomBankPackingTest(unittest.TestCase):
         return render
 
     def test_two_rows_share_one_bank(self):
-        # Two |C|=4 rows pack into bank 1 patterns 1 and 2 (was: bank
-        # 1 and bank 2 in the per-bank-row design).
+        # Two |C|=4 rows pack into bank 1 patterns 1 and 2.
         with WorkDir() as wd:
             render = self._setup_render(
                 wd, [_make_cells(4), _make_cells(4)],
@@ -210,12 +268,15 @@ class OtDoomBankPackingTest(unittest.TestCase):
 
             for pat_num in (1, 2):
                 pattern = project.bank(1).pattern(pat_num)
-                self.assertEqual(
-                    pattern.audio_track(1).active_steps, [1, 5, 9, 13],
-                    f'pattern {pat_num} has wrong trig spacing',
-                )
+                # Same trigs on T1, T2, T3.
+                for track_idx in range(3):
+                    self.assertEqual(
+                        pattern.audio_track(track_idx + 1).active_steps,
+                        [1, 5, 9, 13],
+                        f'pattern {pat_num} track {track_idx + 1} wrong',
+                    )
 
-            # Each row writes its own chains under bank01/.
+            # Each row writes its own packed chains under bank01/.
             chain_wavs = sorted((wd.root / 'render' / 'PACKTWO' / 'bank01').glob('*.wav'))
             self.assertEqual(len(chain_wavs), 8)  # 2 rows × |C|=4 chains
 
@@ -228,7 +289,6 @@ class OtDoomBankPackingTest(unittest.TestCase):
             zip_path = render.render(wd.export_path, 'SPILL')
             project = Project.from_zip(zip_path)
 
-            # Bank 1 patterns 1..16 all configured; bank 2 pattern 1 too.
             for pat_num in range(1, 17):
                 self.assertEqual(
                     project.bank(1).pattern(pat_num).audio_track(1).active_steps,
@@ -239,8 +299,6 @@ class OtDoomBankPackingTest(unittest.TestCase):
                 [1, 5, 9, 13],
             )
 
-            # Render dirs: bank01/ holds 16 × 4 = 64 chain wavs;
-            # bank02/ holds 1 × 4 = 4.
             self.assertEqual(
                 len(list((wd.root / 'render' / 'SPILL' / 'bank01').glob('*.wav'))),
                 64,
@@ -251,8 +309,6 @@ class OtDoomBankPackingTest(unittest.TestCase):
             )
 
     def test_mixed_c_within_bank_is_rejected(self):
-        # Row 1 has |C|=4, row 2 has |C|=8. Both land in bank 1, which
-        # would conflict on part 1's slice_index scenes. Must error.
         with WorkDir() as wd:
             render = self._setup_render(
                 wd, [_make_cells(4), _make_cells(8)],
@@ -264,9 +320,8 @@ class OtDoomBankPackingTest(unittest.TestCase):
             self.assertIn('bank 1', msg)
 
     def test_flex_slot_ceiling(self):
-        # 16 |C|=8 rows = 128 chains (exactly at the ceiling, accepted);
-        # adding a 17th row pushes to 136 (rejected). We test the over
-        # case here.
+        # 16 |C|=8 rows = 128 chains (at the ceiling, accepted);
+        # 17 rows = 136 (rejected). We test the over case here.
         with WorkDir() as wd:
             render = self._setup_render(wd, [_make_cells(8)] * 17)
             with self.assertRaises(SystemExit) as ctx:
@@ -275,12 +330,16 @@ class OtDoomBankPackingTest(unittest.TestCase):
 
 
 class OtDoomRoundtripTest(unittest.TestCase):
-    """End-to-end smoke test: one row, |C|=4, full project layout."""
+    """End-to-end smoke test: one row, |C|=4, full project layout
+    including per-track scenes and FX."""
 
-    def test_4_cell_row_produces_expected_layout(self):
+    def test_4_cell_row_produces_per_track_layout(self):
         render = load_render_module('octatrack/ot-doom')
         with WorkDir() as wd:
-            paths = make_break_wavs(wd.samples, ['kk', 'sn'], bpm=120, steps=32)
+            paths = make_per_track_break_wavs(
+                wd.samples, ['kk', 'sn'], tracks=TRACKS,
+                bpm=120, steps=32,
+            )
             wd.stub_sources(paths)
 
             # One row with 4 cells — varied patterns so the input renders
@@ -299,59 +358,80 @@ class OtDoomRoundtripTest(unittest.TestCase):
             zip_path = render.render(wd.export_path, 'OTDOOMRT')
             self.assertTrue(zip_path.exists())
 
-            # Chain wavs land in the per-bank render dir at 44.1 kHz —
-            # the resample-on-load contract from docs/export/octatrack.md.
-            # Naming: b<bank>_p<pattern>_chain<k>.wav.
+            # Chain wavs land in the per-bank render dir at 44.1 kHz.
             chain_wavs = sorted((wd.root / 'render' / 'OTDOOMRT' / 'bank01').glob('*.wav'))
-            self.assertEqual(len(chain_wavs), 4)  # 1 row × |C|=4 chains
+            self.assertEqual(len(chain_wavs), 4)  # |C|=4 packed chains
             for wav_path in chain_wavs:
                 with wave.open(str(wav_path), 'rb') as w:
                     self.assertEqual(w.getframerate(), 44100)
 
             project = Project.from_zip(zip_path)
 
-            # Each chain → one flex slot with |C|+1 = 5 slice markers
-            # (the trailing duplicate slot for scene B's slice_index = N).
-            for k in range(4):
+            # Each packed chain → one flex slot with 3*(|C|+1) = 15 slice
+            # markers (kick block, snare block, hat block — each
+            # |C|+1 = 5 slices long).
+            n = 4
+            expected_slice_count = len(TRACKS) * (n + 1)
+            for k in range(n):
                 slot = project.get_slot(f'b01_p01_chain{k:02d}.wav')
                 self.assertIsNotNone(slot, f'missing chain {k} slot')
                 sm = project.markers.get_slot(slot, is_static=False)
-                self.assertEqual(sm.slice_count, 5)
-            self.assertIsNone(project.get_slot('b01_p01_chain04.wav'))
+                self.assertEqual(sm.slice_count, expected_slice_count)
+            self.assertIsNone(project.get_slot(f'b01_p01_chain{n:02d}.wav'))
 
             bank = project.bank(1)
             part = bank.part(1)
-            t1 = part.audio_track(1)
 
-            # Track 1: flex + slice mode ON.
-            self.assertEqual(int(t1.setup.slice), 1)
+            # T1, T2, T3 each: flex + slice mode ON, plus DJ_EQ + COMPRESSOR.
+            for track_idx in range(3):
+                t = part.audio_track(track_idx + 1)
+                self.assertEqual(int(t.setup.slice), 1)
+                self.assertEqual(t.fx1_type, FX1Type.DJ_EQ)
+                self.assertEqual(t.fx2_type, FX2Type.COMPRESSOR)
 
-            # Scenes drive the input axis via slice_index (octapy 0.1.23
-            # API). Scene A → slice 0 (input 0). Scene B → slice N (the
-            # duplicate of input N-1) so the lerp covers raw STRT 0 → 2N
-            # and each input gets its own 1/N-th of the fader. See
-            # docs/export/ot-doom.md "Crossfader uniformity".
-            self.assertEqual(part.scene(1).track(1).slice_index, 0)
-            self.assertEqual(part.scene(2).track(1).slice_index, 4)
+            # Per-track scenes — each stem block is n+1 = 5 slices wide.
+            #   T1 (kick):  scene A=0,  scene B=4
+            #   T2 (snare): scene A=5,  scene B=9
+            #   T3 (hat):   scene A=10, scene B=14
+            block = n + 1
+            for track_idx in range(3):
+                self.assertEqual(
+                    part.scene(1).track(track_idx + 1).slice_index,
+                    track_idx * block,
+                )
+                self.assertEqual(
+                    part.scene(2).track(track_idx + 1).slice_index,
+                    track_idx * block + n,
+                )
             self.assertEqual(part.active_scene_a, 0)
             self.assertEqual(part.active_scene_b, 1)
 
+            # T8: CHORUS (FX1) at mix=64 and DELAY (FX2) at send=64.
+            # Different param names because the two FX expose
+            # different wet/dry parameters in octapy.
+            t8 = part.audio_track(8)
+            self.assertEqual(t8.fx1_type, FX1Type.CHORUS)
+            self.assertEqual(t8.fx1.mix, 64)
+            self.assertEqual(t8.fx2_type, FX2Type.DELAY)
+            self.assertEqual(t8.fx2.send, 64)
+
             # Pattern: 16-step grid, N=4 trigs at intervals 16/N = 4 →
-            # steps 1, 5, 9, 13. Each trig sample-locked to its chain.
-            # No per-trig slice_index lock — that would override the
-            # scene's slice_index drive.
+            # steps 1, 5, 9, 13. Same on T1/T2/T3, all sample-locked
+            # to the same packed slot per chain. No per-trig
+            # slice_index lock — that would override the per-track
+            # scene drives.
             pattern = bank.pattern(1)
             self.assertEqual(pattern.scale_length, 16)
-            track = pattern.audio_track(1)
-            self.assertEqual(track.active_steps, [1, 5, 9, 13])
-
             chain_slots = [
-                project.get_slot(f'b01_p01_chain{k:02d}.wav') for k in range(4)
+                project.get_slot(f'b01_p01_chain{k:02d}.wav') for k in range(n)
             ]
-            for k, step_num in enumerate([1, 5, 9, 13]):
-                step = track.step(step_num)
-                self.assertEqual(step.sample_lock, chain_slots[k])
-                self.assertIsNone(step.slice_index)
+            for track_idx in range(3):
+                track = pattern.audio_track(track_idx + 1)
+                self.assertEqual(track.active_steps, [1, 5, 9, 13])
+                for k, step_num in enumerate([1, 5, 9, 13]):
+                    step = track.step(step_num)
+                    self.assertEqual(step.sample_lock, chain_slots[k])
+                    self.assertIsNone(step.slice_index)
 
 
 if __name__ == '__main__':

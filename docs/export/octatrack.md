@@ -1,17 +1,18 @@
 # Octatrack export
 
 Per-target notes for `scripts/export/octatrack/ot-basic/` (per-cell-pattern
-target). Device-side constraints are also referenced from
-`docs/export/ot-doom.md`.
+target, per-track stems). Device-side constraints are also referenced
+from `docs/export/ot-doom.md`.
 
 ## What this target does
 
 One bank per non-empty row, one pattern per cell. Each pattern is a
 1-bar 16-step grid: the captured `eventsPerCycle` slice indices fire
-as trigs at every other step (1, 3, …, 2N-1), each sample-locked to
-its break's flex slot and slice-locked to the captured slice index.
-OT pattern looping plays subsequent cycles. Source breaks are loaded
-into 16-slice flex slots once per project.
+as trigs at every other step (1, 3, …, 2N-1) on each of T1/T2/T3 —
+sample-locked to the per-stem flex slot for that break, slice-locked
+to the captured slice index. OT pattern looping plays subsequent
+cycles. Source breaks are loaded into 16-slice flex slots once per
+project, **three slots per break** (kick, snare, hat).
 
 CLI:
 
@@ -19,33 +20,38 @@ CLI:
 python scripts/export/octatrack/ot-basic/render.py <export.json>
     [--name NAME] [--seed N]
     [--probability 0..1]
-    [--source {json,wav}]
 ```
 
 Output: `tmp/ot-basic/<name>.zip`.
 
 `--probability` (default 1.0 = always fires) snaps to the nearest
 Octatrack `TrigCondition.PERCENT_*` bucket and applies it to every
-captured trig. See `scripts/export/octatrack/ot-basic/render.py` for the bucket
-list.
+captured trig on every track. See `scripts/export/octatrack/ot-basic/render.py`
+for the bucket list.
 
-## Source mode (`--source`)
+## Per-track stems
 
-Default `json`. Controls how break audio is sourced from the gist:
+Each break is rendered as three drum stems (kick / snare / hat) via
+beatwav, each filtered to one drum type before mixdown. Stems map to
+OT audio tracks T1, T2, T3 — same trig pattern on all three (same
+step positions, same `slice_index` per step), distinct `sample_lock`
+per track (the per-stem flex slot). Each kit piece can be muted, EQ'd
+or compressed independently on the device.
 
-- **`json`** — fetch each break's beatwav pattern JSON, render to WAV
-  at the captures' BPM and 44.1 kHz via `beatwav.AudioRenderer`. Closes
-  the latent 48 kHz drift hole described below: every bundled WAV is
-  guaranteed at the OT's native rate, regardless of the gist's source
-  rates.
-- **`wav`** — bundle the gist's WAVs as-is. Legacy mode; necessary for
-  older gists that don't carry sibling JSON files. Drift is latent but
-  not audible at this target's per-event trig granularity (each trig
-  plays for ~1/8 note before being replaced).
+JSON-source rendering only — there's no way to decompose a pre-mixed
+gist WAV into stems after-the-fact, so any break missing its
+`{name}.json` in the gist fails loudly.
 
-JSON mode falls back per-break to WAV when the gist has no
-`{name}.json`, with a warning. See `scripts/export/common/sample_source.py`
-for the shared abstraction (cache layout, S3 mirror, fallback rules).
+## FX layout
+
+Configured once on part 1 per bank:
+
+- **T1, T2, T3**: `FX1 = DJ_EQ`, `FX2 = COMPRESSOR` (defaults; per-track
+  EQ + dynamics shaping).
+- **T8**: `FX1 = CHORUS` (`mix = 64`) and `FX2 = DELAY` (`send = 64`).
+  T8 hosts the project-wide modulation send chain. The two effects
+  use different parameter names for the wet control because they
+  expose different params in octapy.
 
 ## Sample rate: 44100 Hz, full stop
 
@@ -61,14 +67,11 @@ that's most audible when a trig plays an uninterrupted slice for any
 length of time. In the doom render that's the entire 1/4-bar segment
 between trigs, so the lag is plain. In the per-event octatrack render
 each trig plays for ~1/8 note before being replaced, so the same drift
-is there but doesn't accumulate audibly within a single trig.
+is latent rather than audible within a single trig.
 
 **Rule:** every WAV bundled into an OT zip must be 44100 Hz before
-export. JSON-source mode satisfies this by rendering at 44.1 kHz
-up-front (the recommended path). WAV-source mode bundles the gist
-files as-is — a latent bug that's only inaudible because trigs are
-short; if anyone ever lengthens the trig timing, switch to JSON mode
-or resample on load (the way `octatrack/ot-doom/audio.py` does).
+export. The per-stem JSON render hits OT_SAMPLE_RATE up-front, so
+this is satisfied by construction.
 
 ## Other constraints worth knowing
 
@@ -77,10 +80,11 @@ or resample on load (the way `octatrack/ot-doom/audio.py` does).
 - **Channel count**: mono or stereo. The device will play either; mix
   on the source side if needed.
 - **Slot pool**: 128 flex slots, 128 static slots per project. The
-  per-cell-pattern target uses one flex slot per unique break name —
-  small. The doom target's 16 rows × 16 cells = 256 chains exceeds
-  the flex pool; its validator should sanity-check before this is a
-  real concern.
+  per-cell-pattern target uses **3 flex slots per unique break name**
+  (kick + snare + hat) — small in practice for tempera-realistic
+  break-vocabulary sizes. The doom target's pack-stems-into-one-slot
+  design keeps slot count the same as the old mixed-stem version;
+  see `docs/export/ot-doom.md`.
 - **Project tempo** is set on `Project.settings.tempo` (float BPM).
   Slice markers + crossfader interpolation are tempo-relative, so
   getting this right matters even when nothing on the OT side is
@@ -91,4 +95,5 @@ or resample on load (the way `octatrack/ot-doom/audio.py` does).
 - octapy ≥ 0.1.23: `AudioSceneTrack.slice_index` (used by ot-doom for
   the crossfader). Confirmed in the 0.1.31 pin in `requirements.txt`.
 - `docs/export/ot-doom.md` — second OT target (megabreak-of-doom),
-  shares this device-side constraint sheet.
+  shares this device-side constraint sheet plus the per-track stems
+  shape.

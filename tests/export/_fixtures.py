@@ -98,6 +98,33 @@ def make_break_wavs(
     return paths
 
 
+def make_per_track_break_wavs(
+    dest_dir: pathlib.Path,
+    names: List[str],
+    tracks: tuple = ('kick', 'snare', 'hat'),
+    bpm: int = 120,
+    steps: int = 32,
+) -> Dict[str, Dict[str, pathlib.Path]]:
+    """Synthesise one sine WAV per (name, track) pair so per-stem slots
+    registered with `add_sample` get distinct paths and don't dedupe.
+    Each (name, track) gets a unique frequency.
+
+    Filename layout: `<name>__<track>.wav` so basenames stay unique
+    inside one OT project's slot pool.
+    """
+    duration_s = steps * 60.0 / bpm / 4
+    out: Dict[str, Dict[str, pathlib.Path]] = {}
+    for i, name in enumerate(names):
+        per_track: Dict[str, pathlib.Path] = {}
+        for j, track in enumerate(tracks):
+            freq = 220.0 * (1.05946 ** (i * len(tracks) + j))
+            path = dest_dir / f'{name}__{track}.wav'
+            write_sine_wav(path, freq, duration_s)
+            per_track[track] = path
+        out[name] = per_track
+    return out
+
+
 def make_capture_cell(
     break_names: List[str],
     pattern_idxs: List[Optional[int]],
@@ -138,21 +165,53 @@ def make_export(
     }
 
 
-def stub_sample_source(name_to_path: Dict[str, pathlib.Path]):
+def stub_sample_source(name_to_path):
     """Replace `common.sample_source.resolve_break_paths` with a stub that
     returns pre-supplied local files instead of hitting the gist or
-    rendering JSON. Returns a teardown callable that restores the
-    original — call it from a `finally` (or use `WorkDir.stub_sources`,
-    which wires teardown into the WorkDir's exit)."""
+    rendering JSON.
+
+    `name_to_path` may be either:
+    - flat `{name: Path}` — used for mixed-stem renders (or when the
+      caller doesn't ask for `tracks`); per-track requests reuse the
+      same path across all tracks (fine for plumbing-only tests).
+    - nested `{name: {track: Path}}` — distinct path per stem so
+      `project.add_sample` registers separate flex slots; required by
+      tests that walk per-track slot/sample-lock wiring.
+
+    Returns a teardown callable that restores the original — call it
+    from a `finally` (or use `WorkDir.stub_sources`, which wires
+    teardown into the WorkDir's exit).
+    """
     if str(EXPORT_ROOT) not in sys.path:
         sys.path.insert(0, str(EXPORT_ROOT))
     from common import sample_source
 
     original = sample_source.resolve_break_paths
 
+    def _flat(name):
+        v = name_to_path[name]
+        if isinstance(v, dict):
+            # Nested input but caller asked for the flat form — pick
+            # an arbitrary track. Tests that need flat output should
+            # pass flat input.
+            raise ValueError(
+                f'stub configured per-track for {name!r}; mixed-stem '
+                f'request not supported in this stub'
+            )
+        return v
+
+    def _per_track(name, tracks):
+        v = name_to_path[name]
+        if isinstance(v, dict):
+            return {t: v[t] for t in tracks}
+        return {t: v for t in tracks}
+
     def fake_resolve(*, gist_user, gist_id, names, source,
-                     target_bpm, target_sample_rate, num_bars=2):
-        return {n: name_to_path[n] for n in names}
+                     target_bpm, target_sample_rate, num_bars=2,
+                     tracks=None):
+        if tracks is None:
+            return {n: _flat(n) for n in names}
+        return {n: _per_track(n, tracks) for n in names}
 
     sample_source.resolve_break_paths = fake_resolve
 

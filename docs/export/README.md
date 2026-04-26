@@ -6,9 +6,9 @@ several formats:
 
 | Doc | Target | Output | Source mode |
 |---|---|---|---|
-| [octatrack.md](octatrack.md) | `scripts/export/octatrack/ot-basic/` | OT project zip — one bank per row, one pattern per cell | `--source {json,wav}` |
-| [ot-doom.md](ot-doom.md) | `scripts/export/octatrack/ot-doom/` | OT project zip — megabreak-of-doom matrix chains | `--source {json,wav}` |
-| [torso-s4.md](torso-s4.md) | `scripts/export/torso-s4/` | Torso S-4 sample bundle — one WAV per row | `--source {json,wav}` |
+| [octatrack.md](octatrack.md) | `scripts/export/octatrack/ot-basic/` | OT project zip — per-cell patterns, per-track stems | JSON-only (per-stem) |
+| [ot-doom.md](ot-doom.md) | `scripts/export/octatrack/ot-doom/` | OT project zip — megabreak-of-doom matrix chains, per-track stems | JSON-only (per-stem) |
+| [torso-s4.md](torso-s4.md) | `scripts/export/torso-s4/` | Torso S-4 sample bundle — one mixed WAV per row | `--source {json,wav}` (mixed) |
 | [strudel.md](strudel.md) | `scripts/export/strudel/` | Standalone `.strudel.js` playback template | (n/a — WAV-only by construction) |
 
 ## Shared infrastructure
@@ -24,18 +24,27 @@ several formats:
   modes:
   - `json` (default) — fetch each break's beatwav pattern JSON from
     the gist, render to WAV at the captures' BPM and the device's
-    native sample rate.
+    native sample rate. Optional `tracks` kwarg (used by the OT
+    targets) renders one WAV per drum stem (kick/snare/hat) by
+    filtering matched_hits per drum type.
   - `wav` — fetch each break's WAV from the gist as-is. Required for
     older WAV-only gists; per-break fallback when JSON mode finds no
-    sibling JSON.
+    sibling JSON. Mixed-stem only — gist WAVs can't be split into
+    per-track stems after the fact.
 
   Cache layout under `tmp/samples/<gistId>/`:
 
   ```
-  <name>.wav                            gist-fetched WAVs
-  json/<name>.json                      gist-fetched JSON patterns
-  rendered/sr<rate>_bpm<bpm>/<name>.wav JSON-rendered WAVs
+  <name>.wav                                       gist-fetched WAVs
+  json/<name>.json                                 gist-fetched JSON patterns
+  rendered/sr<rate>_bpm<bpm>/<name>.wav            JSON-rendered mixed WAVs
+  rendered/sr<rate>_bpm<bpm>/<name>__<track>.wav   per-track stems
   ```
+
+  Per-stem files use a flat `<name>__<track>.wav` layout so basenames
+  stay unique across breaks (the OT's `add_sample` deduplicates by
+  basename, so nested per-name dirs would collapse all breaks' same
+  stem into one slot).
 
   The rendered cache is keyed on (sample_rate, bpm) so the OT
   (44.1 kHz) and S-4 (96 kHz) caches coexist without collision.
@@ -43,6 +52,9 @@ several formats:
   JSON mode mirrors `s3://wol-samplebank/samples/` to `tmp/oneshots/`
   via `aws s3 sync` on first use — that's where the one-shot drum
   samples beatwav references live.
+- **`scripts/export/common/devices.py`** — per-device sample-rate
+  constants (`OT_SAMPLE_RATE`, `S4_SAMPLE_RATE`) shared across
+  targets so the two Octatrack targets can't drift apart.
 
 ## Strudel runtime quirks
 

@@ -22,9 +22,9 @@ Output: `tmp/strudel/<name>.strudel.js`. Paste the file into
 There is **no `--source` flag** here. The generated template is
 WAV-only by construction — `await samples(gistUrl)` reads the gist's
 `strudel.json` (`name → ["name.wav"]`) and Strudel's audio engine
-loads each WAV directly. Sibling JSON pattern files in the gist (used
-by the audio targets in `--source json` mode) are ignored on the
-playback side.
+loads each WAV directly. Sibling JSON pattern files in the gist
+(used by the OT audio targets for per-stem rendering) are ignored
+on the playback side.
 
 ## What gets baked
 

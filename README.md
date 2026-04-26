@@ -192,43 +192,46 @@ into device-specific formats:
 
 | Target | Output | Doc |
 |---|---|---|
-| `octatrack/ot-basic/` | OT project zip — one bank per row, one pattern per cell | [docs/export/octatrack.md](docs/export/octatrack.md) |
-| `octatrack/ot-doom/` | OT project zip — megabreak-of-doom matrix chains | [docs/export/ot-doom.md](docs/export/ot-doom.md) |
-| `torso-s4/` | Torso S-4 sample bundle — one WAV per row | [docs/export/torso-s4.md](docs/export/torso-s4.md) |
+| `octatrack/ot-basic/` | OT project zip — per-cell patterns, per-track stems on T1-T3 | [docs/export/octatrack.md](docs/export/octatrack.md) |
+| `octatrack/ot-doom/` | OT project zip — megabreak-of-doom matrix chains, per-track stems on T1-T3 | [docs/export/ot-doom.md](docs/export/ot-doom.md) |
+| `torso-s4/` | Torso S-4 sample bundle — one mixed WAV per row | [docs/export/torso-s4.md](docs/export/torso-s4.md) |
 | `strudel/` | Standalone `.strudel.js` playback template | [docs/export/strudel.md](docs/export/strudel.md) |
 
 Common shape:
 
 ```
-python scripts/export/<target>/render.py <export.json> [--name NAME] [--seed N] [--source {json,wav}]
+python scripts/export/<target>/render.py <export.json> [--name NAME] [--seed N]
 ```
 
-### Source mode (`--source`, audio targets only)
+### Source rendering
 
-The Strudel sample gist now publishes both `name.wav` (the
-breakbeat) and `name.json` (a [beatwav](https://github.com/jhw/beatwav)
-pattern that re-synthesises the breakbeat from one-shot drum samples).
-Pick the source per export:
+The Strudel sample gist publishes both `name.wav` (the breakbeat)
+and `name.json` (a [beatwav](https://github.com/jhw/beatwav)
+pattern that re-synthesises the breakbeat from one-shot drum
+samples). The export targets render the JSON at the captures' BPM
+and the device's native sample rate; the pre-baked WAV is only used
+as a legacy fallback for older WAV-only gists (torso-s4 only — the
+OT targets need per-stem decomposition and are JSON-only).
 
-- **`json`** (default) — fetch each break's beatwav JSON, render to
-  WAV at the captures' BPM and the device's native sample rate
-  (44.1 kHz for OT, 96 kHz for S-4). Tempo is correct by
-  construction; no resample-on-load; closes the OT's latent
-  48-kHz-source drift hole.
-- **`wav`** — bundle the gist's WAVs as-is. Necessary for older
-  WAV-only gists; per-break fallback when JSON mode finds no sibling
-  JSON.
+The OT targets render each break **per drum stem** (kick / snare /
+hat) by filtering the JSON's matched_hits per drum type. Stems map
+to OT tracks T1, T2, T3 — each gets its own DJ_EQ + COMPRESSOR for
+independent shaping, sharing CHORUS + DELAY on T8.
 
-JSON mode pulls one-shots from the `wol-samplebank` S3 bucket
-(`s3://wol-samplebank/samples/`) and mirrors them to `tmp/oneshots/`
-on first use via `aws s3 sync` — needs AWS credentials with read on
-the bucket. The shared resolver, cache layout, and fallback rules
-live in `scripts/export/common/sample_source.py`. Per-device sample
-rates live in `scripts/export/common/devices.py`.
+JSON-mode rendering pulls one-shots from the `wol-samplebank` S3
+bucket (`s3://wol-samplebank/samples/`) and mirrors them to
+`tmp/oneshots/` on first use via `aws s3 sync` — needs AWS
+credentials with read on the bucket. The shared resolver, cache
+layout, and fallback rules live in
+`scripts/export/common/sample_source.py`. Per-device sample rates
+live in `scripts/export/common/devices.py`.
+
+The `torso-s4/` target keeps a `--source {json,wav}` flag (default
+`json`) for the mixed-stem rendering it needs.
 
 The `strudel/` target is a JS template generator, not an audio
-renderer — it has no `--source` flag. The generated `.strudel.js`
-loads WAVs at runtime via `samples(gistUrl)`, exactly like
+renderer — no `--source` flag. The generated `.strudel.js` loads
+WAVs at runtime via `samples(gistUrl)`, exactly like
 `tempera.strudel.js`.
 
 ## Tests

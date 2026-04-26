@@ -4,14 +4,25 @@
 Each row → one bank. Each cell → one pattern in that bank. Each pattern is a
 1-bar / 16-step grid matching one Strudel cycle: the cell's pattern of
 eventsPerCycle slice indices becomes eventsPerCycle trigs at every other
-step (steps 1, 3, ..., 2N-1) with a FLEX sample_lock (break name) and
-slice_index p-lock (pattern slice). OT pattern looping plays subsequent
-cycles — equivalent to Strudel's per-cycle pattern repeat.
+step (steps 1, 3, ..., 2N-1) on each of T1/T2/T3, with a FLEX
+sample_lock (per-track break stem) and slice_index p-lock (pattern
+slice). OT pattern looping plays subsequent cycles.
+
+Per-track design: each break is rendered as three drum stems (kick /
+snare / hat) via beatwav. Each cell's trig at step `s` fires
+identically on T1, T2, T3 — same `slice_index`, distinct
+`sample_lock` per track — so muting / EQ / compression can shape each
+kit piece independently on the device.
+
+FX layout (configured once on part 1):
+  T1, T2, T3: FX1 = DJ_EQ, FX2 = COMPRESSOR
+  T8:         FX1 = CHORUS,  FX2 = DELAY        (mix = 64 each)
 
 Samples referenced by the captures are fetched from the source gist
-(`context.gistUser` / `context.gistId` → strudel.json) and cached under
-tmp/samples/<gistId>/. Each sample slot gets 16 equal slice markers so the
-slice_index p-locks resolve on-device.
+(`context.gistUser` / `context.gistId` → strudel.json) and re-rendered
+per drum stem at OT_SAMPLE_RATE via beatwav. Cached under
+tmp/samples/<gistId>/. Each per-stem flex slot gets 16 equal slice
+markers so the slice_index p-locks resolve on-device.
 
 Usage:
     python scripts/export/octatrack/ot-basic/render.py <path/to/export.json> [--name NAME] [--seed N]
@@ -41,10 +52,9 @@ from common.cli import build_parser, require_file, resolve_name
 from common.devices import OT_SAMPLE_RATE
 from common.schema import load_export
 
-# Octatrack expects OT_SAMPLE_RATE (44.1 kHz) at trig time. JSON-source
-# rendering hits this rate up-front; WAV-source bundling lands the
-# gist's mixed-rate WAVs as-is — see docs/export/octatrack.md for the
-# latent-bug discussion.
+# Per-drum stems we ask beatwav to produce. Maps to OT audio tracks
+# 1/2/3 in trig order.
+TRACKS = ('kick', 'snare', 'hat')
 
 # Source break wavs are 32 steps (2 bars at 1/16). N_SLICES=16 cuts them
 # into 16 slices of 2 steps each, so a slice spans an 1/8 note plus the
@@ -53,6 +63,12 @@ from common.schema import load_export
 # slices and the OT pattern (1/8-note step grid) couldn't address them.
 N_SLICES = 16
 OT_PATTERN_STEPS = 16  # 1 bar at 1/16 per step — one Strudel cycle
+
+# Wet/dry value for the T8 send/master FX (CHORUS, DELAY). 64 ≈ 50%
+# on the OT 0-127 parameter scale. The two effects use different
+# parameter names for the wet control: CHORUS exposes .mix, DELAY
+# exposes .send.
+T8_FX_LEVEL = 64
 
 # Octatrack trig probability buckets (TrigCondition.PERCENT_*). The OT
 # can only express the discrete values listed below; arbitrary
@@ -140,7 +156,27 @@ def collect_break_names(banks):
     return names
 
 
-def build_project(export_path, name, probability=1.0, source='json'):
+def configure_track_fx(part):
+    """Set FX layout on part 1 once per bank.
+
+    T1/T2/T3 carry the per-stem playback. Each gets DJ_EQ on FX1 and
+    COMPRESSOR on FX2 — independent EQ + dynamics per kit piece.
+    T8 hosts CHORUS (FX1) and DELAY (FX2) at mix=64 as the
+    project-level send chain.
+    """
+    for track_num in (1, 2, 3):
+        t = part.audio_track(track_num)
+        t.fx1_type = FX1Type.DJ_EQ
+        t.fx2_type = FX2Type.COMPRESSOR
+
+    t8 = part.audio_track(8)
+    t8.fx1_type = FX1Type.CHORUS
+    t8.fx1.mix = T8_FX_LEVEL    # CHORUS: wet/dry on .mix
+    t8.fx2_type = FX2Type.DELAY
+    t8.fx2.send = T8_FX_LEVEL   # DELAY: wet level on .send (no .mix here)
+
+
+def build_project(export_path, name, probability=1.0):
     trig_condition = probability_to_condition(probability)
     payload, ctx = load_export(export_path, REQUIRED_CTX)
     if ctx['nSlices'] != N_SLICES:
@@ -156,49 +192,50 @@ def build_project(export_path, name, probability=1.0, source='json'):
             sys.exit(f'bank {i} has {len(bank)} cells > 16')
 
     break_names = collect_break_names(banks_in)
-    local_paths = sample_source.resolve_break_paths(
+    # Per-stem rendering: returns {name: {kick: path, snare: path, hat: path}}.
+    # JSON-source only — gist's pre-mixed WAVs can't be split into stems.
+    stem_paths = sample_source.resolve_break_paths(
         gist_user=ctx['gistUser'],
         gist_id=ctx['gistId'],
         names=break_names,
-        source=source,
+        source='json',
         target_bpm=ctx['bpm'],
         target_sample_rate=OT_SAMPLE_RATE,
+        tracks=TRACKS,
     )
 
     project = Project.from_template(name.upper()[:16])
     project.settings.tempo = float(ctx['bpm'])
     project.master_track = True
 
-    # NOTE on sample rate: in JSON-source mode (the default) WAVs are
-    # rendered at OT_SAMPLE_RATE = 44.1 kHz up-front, so the OT plays
-    # them back at the recorded rate. In WAV-source mode the gist's
-    # mixed-rate WAVs (44.1 / 48 kHz) are bundled as-is — see
-    # docs/export/octatrack.md: a 48 kHz file plays at ~91.9% speed, but each trig
-    # only fires for ~1/8 note before being replaced, so the drift is
-    # latent rather than audible. JSON mode fixes it for free.
-    flex_slots = {}
+    # Each break gets one flex slot per drum stem. Slot count grows 3×
+    # vs the old mixed-stem design — small, well under the 128-slot
+    # ceiling for tempera-realistic break counts.
+    flex_slots = {}  # {(name, track): slot}
     for n in break_names:
-        path = local_paths[n]
-        slot = project.add_sample(str(path.resolve()), slot_type='FLEX')
-        flex_slots[n] = slot
-        frames, sr = wav_info(path)
-        set_equal_slices(project, slot, N_SLICES, frames, sr)
+        for track in TRACKS:
+            path = stem_paths[n][track]
+            slot = project.add_sample(str(path.resolve()), slot_type='FLEX')
+            flex_slots[(n, track)] = slot
+            frames, sr = wav_info(path)
+            set_equal_slices(project, slot, N_SLICES, frames, sr)
 
-    default_slot = flex_slots[break_names[0]]
+    # Default flex slot per track — only relevant if a step has no
+    # sample_lock, which our patterns never produce; we pick the first
+    # break's stem for symmetry across the three tracks.
+    default_slot_per_track = {
+        track: flex_slots[(break_names[0], track)] for track in TRACKS
+    }
 
     for bank_idx, bank_cells in enumerate(banks_in):
         bank = project.bank(bank_idx + 1)
         part = bank.part(1)
 
-        t1 = part.audio_track(1)
-        t1.configure_flex(default_slot)
-        t1.setup.slice = SliceMode.ON
-        t1.fx2_type = FX2Type.DELAY
-        t1.fx2.send = 64
-
-        t8 = part.audio_track(8)
-        t8.fx1_type = FX1Type.CHORUS
-        t8.fx1.mix = 64
+        for track_idx, track in enumerate(TRACKS):
+            t = part.audio_track(track_idx + 1)
+            t.configure_flex(default_slot_per_track[track])
+            t.setup.slice = SliceMode.ON
+        configure_track_fx(part)
 
         for cell_idx, cell in enumerate(bank_cells):
             pattern = bank.pattern(cell_idx + 1)
@@ -209,24 +246,25 @@ def build_project(export_path, name, probability=1.0, source='json'):
                 cell['break'], cell['pattern'],
                 ctx['eventsPerCycle'],
             )
-            track = pattern.audio_track(1)
             active = [2 * i + 1 for i, (_, s) in enumerate(events) if s is not None]
-            track.active_steps = active
-            for i, (name, slice_idx) in enumerate(events):
-                if slice_idx is None:
-                    continue
-                step = track.step(2 * i + 1)
-                step.sample_lock = flex_slots[name]
-                step.slice_index = slice_idx
-                if trig_condition is not None:
-                    step.condition = trig_condition
+
+            for track_idx, track in enumerate(TRACKS):
+                pattern_track = pattern.audio_track(track_idx + 1)
+                pattern_track.active_steps = active
+                for i, (n, slice_idx) in enumerate(events):
+                    if slice_idx is None:
+                        continue
+                    step = pattern_track.step(2 * i + 1)
+                    step.sample_lock = flex_slots[(n, track)]
+                    step.slice_index = slice_idx
+                    if trig_condition is not None:
+                        step.condition = trig_condition
 
     return project
 
 
-def render(export_path, name, probability=1.0, source='json'):
-    project = build_project(export_path, name,
-                            probability=probability, source=source)
+def render(export_path, name, probability=1.0):
+    project = build_project(export_path, name, probability=probability)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     zip_path = OUTPUT_DIR / f'{name}.zip'
     project.to_zip(zip_path)
@@ -238,11 +276,9 @@ def main():
     parser.add_argument('--probability', type=float, default=1.0,
                         help='per-trig probability in [0, 1] (default 1.0 = always fires); '
                              'snaps to the nearest OT trig-condition bucket')
-    sample_source.add_source_arg(parser)
     args = parser.parse_args()
     require_file(args.export)
-    out = render(args.export, resolve_name(args),
-                 probability=args.probability, source=args.source)
+    out = render(args.export, resolve_name(args), probability=args.probability)
     print(out)
 
 
