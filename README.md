@@ -263,11 +263,14 @@ Auto-detects the connected device by scanning `/Volumes/`; pass
 generated with `--name MYPROJECT`) out of auto-batch verbs.
 
 ```
+tools/sync.py                          # default = status (no args, never destructive)
 tools/sync.py push                     # extract local zips onto the device
 tools/sync.py clean local              # remove ~/Downloads/<adj>-<noun>.<suffix>
 tools/sync.py clean remote             # remove device-side projects
 tools/sync.py clean stubs              # OT-only: remove dangling non-project dirs
 tools/sync.py status                   # compare local vs remote for the detected device
+tools/sync.py watch                    # poll /Volumes + ~/Downloads; auto-push new zips
+                                       # when the device appears (push-only, never cleans)
 ```
 
 Common args on every verb: `pattern` (substring filter on project

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Unified push / clean / status for strudelbreaks devices.
+"""Unified push / clean / status / watch for strudelbreaks devices.
 
 Replaces the per-device scripts that used to live under
 tools/<device>/. Auto-detects the connected device by scanning
@@ -8,11 +8,15 @@ both Octatrack and Torso S-4 plugged in at once).
 
 Subcommands:
 
+    sync.py                              # default = status
     sync.py push  [pattern] [-f] [--device DEVICE]
     sync.py clean local  [pattern] [-f] [--device DEVICE]
     sync.py clean remote [pattern] [-f] [--device DEVICE]
     sync.py clean stubs  [pattern] [-f]               # OT-only
     sync.py status [--device DEVICE]
+    sync.py watch [-f] [--device DEVICE] [--interval N]
+        Poll /Volumes/ and ~/Downloads; auto-push new local-only
+        zips when a device is mounted. Push-only — never cleans.
 
 Devices:
 
@@ -29,6 +33,7 @@ import pathlib
 import re
 import shutil
 import sys
+import time
 import zipfile
 from typing import Optional
 
@@ -396,6 +401,57 @@ def status(spec: dict) -> None:
     print(f'  remote-only : {", ".join(only_remote) or "—"}')
 
 
+# ---- watch ----
+
+def _watch_tick(targets: list, seen: dict, force: bool) -> dict:
+    """One iteration of the watch loop. Detects mount/unmount events
+    and new local files per device, and re-runs `push` whenever the
+    state changed for a mounted device. Returns the updated `seen`
+    dict so the loop carries state across ticks.
+
+    Idempotent: `push` already skips zips already on the device, so
+    even if state appears to change spuriously the worst case is a
+    short status print — never a duplicate extract.
+
+    Push-only: this never invokes any clean verb. A watcher that
+    deleted things on its own would be a footgun."""
+    for spec in targets:
+        vol = spec['volume']
+        mounted = vol.exists() if vol is not None else False
+        local = {p.name for p in find_local(spec['suffix'])}
+        key = id(spec)
+        prev = seen.get(key, {'mounted': False, 'local': set()})
+        label = vol.name if vol is not None else spec['suffix']
+
+        if mounted != prev['mounted']:
+            print(f'[{label}] {"mounted" if mounted else "unmounted"}')
+        for n in sorted(local - prev['local']):
+            print(f'[{label}] local: {n}')
+
+        changed = mounted != prev['mounted'] or local != prev['local']
+        if changed and mounted and local:
+            push(spec, pattern=None, force=force)
+
+        seen[key] = {'mounted': mounted, 'local': local}
+    return seen
+
+
+def watch(targets: list, interval: float, force: bool) -> None:
+    """Long-running poller. Stops on Ctrl-C."""
+    if not targets:
+        sys.exit('watch needs at least one device with a volume path '
+                 '(strudel has no remote — nothing to watch for)')
+    print('watching... Ctrl-C to stop')
+    seen: dict = {}
+    while True:
+        try:
+            seen = _watch_tick(targets, seen, force)
+            time.sleep(interval)
+        except KeyboardInterrupt:
+            print('\nstopped')
+            return
+
+
 # ---- argparse ----
 
 def build_parser() -> argparse.ArgumentParser:
@@ -428,12 +484,38 @@ def build_parser() -> argparse.ArgumentParser:
 
     status_p = sub.add_parser('status', help='compare local vs remote for the detected device')
     status_p.add_argument('--device')
+
+    watch_p = sub.add_parser(
+        'watch',
+        help='poll /Volumes and ~/Downloads; auto-push new local-only zips',
+    )
+    watch_p.add_argument('-f', '--force', action='store_true',
+                         help='no per-item prompt when pushing')
+    watch_p.add_argument('--device',
+                         help='watch only this device (default: any '
+                              'device with a volume path)')
+    watch_p.add_argument('--interval', type=float, default=2.0,
+                         help='poll interval in seconds (default 2)')
     return ap
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
     cmd = args.cmd or 'status'
+
+    if cmd == 'watch':
+        # `watch` doesn't go through resolve_device — that exits when
+        # no device is mounted, but the whole point of watching is to
+        # wait for one to appear. Without --device we watch every
+        # known device with a volume path.
+        if args.device:
+            _, spec = resolve_device(args.device)
+            targets = [spec]
+        else:
+            targets = [s for s in DEVICES.values() if s['volume'] is not None]
+        watch(targets, args.interval, args.force)
+        return
+
     _, spec = resolve_device(getattr(args, 'device', None))
     if cmd == 'push':
         push(spec, args.pattern, args.force)

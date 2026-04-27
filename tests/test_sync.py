@@ -360,6 +360,85 @@ class StatusTest(unittest.TestCase):
             self.assertIn('BAZ-QUX', out)
 
 
+class WatchTickTest(unittest.TestCase):
+    """The watch loop is one `_watch_tick` call per poll. Drive it
+    directly from tests to verify mount/unmount detection, new-file
+    detection, and the push-on-change behaviour without touching
+    time.sleep."""
+
+    def _capture_stdout(self, fn, *args):
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            return fn(*args), buf.getvalue()
+        finally:
+            sys.stdout = old
+
+    def test_mount_event_triggers_push(self):
+        with WorkDir() as wd:
+            volume, root = wd.patch_device_paths(
+                'octatrack', wd._tmp / 'OCTATRACK',
+                'strudelbeats', mount=False,
+            )
+            zp = wd.downloads / 'foo-bar.ot.zip'
+            _make_zip(zp, {'FOO-BAR/project.work': b''})
+
+            # Tick 1: device not mounted, no push, no output beyond
+            # the (silent) initial state.
+            seen, out = self._capture_stdout(sync._watch_tick,
+                                             [sync.DEVICES['octatrack']],
+                                             {}, True)
+            self.assertNotIn('mounted', out)
+            self.assertFalse((root / 'FOO-BAR').exists())
+
+            # Now plug the device in.
+            volume.mkdir()
+            seen, out = self._capture_stdout(sync._watch_tick,
+                                             [sync.DEVICES['octatrack']],
+                                             seen, True)
+            self.assertIn('mounted', out)
+            self.assertTrue((root / 'FOO-BAR' / 'project.work').exists())
+
+    def test_new_local_file_triggers_push(self):
+        with WorkDir() as wd:
+            volume, root = wd.patch_device_paths(
+                'octatrack', wd._tmp / 'OCTATRACK',
+                'strudelbeats', mount=True,
+            )
+            seen, _ = self._capture_stdout(sync._watch_tick,
+                                           [sync.DEVICES['octatrack']],
+                                           {}, True)
+            # Drop a new zip into Downloads.
+            zp = wd.downloads / 'baz-qux.ot.zip'
+            _make_zip(zp, {'BAZ-QUX/project.work': b''})
+
+            seen, out = self._capture_stdout(sync._watch_tick,
+                                             [sync.DEVICES['octatrack']],
+                                             seen, True)
+            self.assertIn('local: baz-qux.ot.zip', out)
+            self.assertTrue((root / 'BAZ-QUX' / 'project.work').exists())
+
+    def test_no_change_no_push(self):
+        # Steady state: same mount, same files → tick is a no-op.
+        with WorkDir() as wd:
+            volume, root = wd.patch_device_paths(
+                'octatrack', wd._tmp / 'OCTATRACK',
+                'strudelbeats', mount=True,
+            )
+            zp = wd.downloads / 'foo-bar.ot.zip'
+            _make_zip(zp, {'FOO-BAR/project.work': b''})
+
+            seen, _ = self._capture_stdout(sync._watch_tick,
+                                           [sync.DEVICES['octatrack']],
+                                           {}, True)
+            # Tick again — nothing changed, no output.
+            seen, out = self._capture_stdout(sync._watch_tick,
+                                             [sync.DEVICES['octatrack']],
+                                             seen, True)
+            self.assertEqual(out, '')
+
+
 class MainNoArgsTest(unittest.TestCase):
     """Bare `sync.py` (no subcommand) should run `status` rather than
     error out — the destructive verbs stay explicit, but the safe
