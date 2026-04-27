@@ -158,12 +158,17 @@ function snapTo(sliders) {
 
 // Math.random not the seeded rng: the seeded rng drives deterministic
 // content generation at load; an interactive randomise should produce
-// different results each click.
+// different results each click. Probability defaults to 75%
+// (`prob+1)/N_PROBS == 0.75`, i.e. slider step `0.75 * N_PROBS - 1`)
+// rather than full so the rendered shape has visible thinning out of
+// the box.
+const RANDOMISE_PROB_DEFAULT = Math.round(0.75 * N_PROBS) - 1;
+
 function randomise() {
   currentSliders.rootBreak = Math.floor(Math.random() * names.length);
   currentSliders.altBreak  = Math.floor(Math.random() * N_BREAKS);
   currentSliders.pattern   = Math.floor(Math.random() * N_PATTERNS);
-  currentSliders.prob      = N_PROBS - 1;
+  currentSliders.prob      = RANDOMISE_PROB_DEFAULT;
   sliderPanel.setAll(currentSliders);
   log.tick();
 }
@@ -392,7 +397,10 @@ const capturesList = SB.ui.createCornerPanel({
   style: 'padding:8px 10px;max-width:600px',
 });
 const listEl = document.createElement('div');
-listEl.style.cssText = 'overflow-y:auto;overflow-x:auto;white-space:pre;min-height:1.4em;max-height:45vh';
+// Vertical scroll only on the list; horizontal scroll lives on each
+// row's left half (the patterns), so the row count + delete on the
+// right stay anchored even when there are too many cells to fit.
+listEl.style.cssText = 'overflow-y:auto;min-height:1.4em;max-height:45vh';
 capturesList.element.appendChild(listEl);
 
 function deleteRow(i) {
@@ -418,19 +426,31 @@ function renderCaptures() {
   capturesList.element.style.display = '';
   for (let i = banks.length - 1; i >= 0; i--) {
     const bank = banks[i];
+
+    // Two-column flex row: left holds the cell list (left-justified,
+    // own horizontal scroll), right holds the count + row-delete
+    // (right-justified, never scrolls out of view). `min-width:0` on
+    // the left child is the standard flex trick for letting an
+    // overflowing inline-content child actually shrink instead of
+    // pushing the whole row wide.
     const row = document.createElement('div');
-    // Plain block div (no flex): listEl's white-space:pre keeps the
-    // row on one line and triggers horizontal scroll on overflow; icons
-    // stay 16x16 because nothing flex-shrinks them.
+    row.style.cssText = 'display:flex;align-items:center;gap:8px';
 
+    const cells = document.createElement('div');
+    cells.style.cssText = 'flex:1;min-width:0;overflow-x:auto;white-space:pre';
     bank.forEach((c, j) => {
-      if (j > 0) row.appendChild(document.createTextNode(' │ '));
-      row.appendChild(patchSpan(c.sliders));
-      row.appendChild(SB.ui.createDeleteIcon(() => deleteCell(i, j)));
+      if (j > 0) cells.appendChild(document.createTextNode(' │ '));
+      cells.appendChild(patchSpan(c.sliders));
+      cells.appendChild(SB.ui.createDeleteIcon(() => deleteCell(i, j)));
     });
-    row.appendChild(document.createTextNode(' │ ' + bank.length + ' │ '));
-    row.appendChild(SB.ui.createDeleteIcon(() => deleteRow(i)));
 
+    const trail = document.createElement('div');
+    trail.style.cssText = 'flex:0 0 auto;display:flex;align-items:center;white-space:pre';
+    trail.appendChild(document.createTextNode('│ ' + bank.length + ' │ '));
+    trail.appendChild(SB.ui.createDeleteIcon(() => deleteRow(i)));
+
+    row.appendChild(cells);
+    row.appendChild(trail);
     listEl.appendChild(row);
   }
 }
@@ -458,6 +478,12 @@ function newRow() {
 }
 
 renderCaptures();
+
+// Auto-randomise on page load so each fresh paste lands on a
+// different patch — the deterministic seeded rng generates the
+// breaks/patterns vocab; this picks a fresh starting point inside
+// that vocab via Math.random.
+randomise();
 // ===========================
 
 // ===== PATTERN-GRAPH SIGNALS =====
