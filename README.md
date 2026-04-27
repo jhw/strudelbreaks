@@ -49,7 +49,7 @@ window.StrudelBreaks = {
   mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
   util:  { meanIndex, thinByUniforms },
   hex:   { hex2, hexPad, arrayHex },
-  ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createSliderRow, createSliderPanel, createActionMenu, resetUI },
+  ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createSliderRow, createSliderPanel, createToggleRow, createActionMenu, resetUI },
   store: { createPersistedStore, downloadBlob },
 };
 ```
@@ -152,6 +152,12 @@ at the edge (for Strudel's `mini()` / `fmap(mini).innerJoin()` dance).
   `createCornerPanel` — useful for stacking the slider panel above or
   below another corner-anchored block. Thin convenience over
   `createCornerPanel` + repeated `createSliderRow`.
+- `createToggleRow({ label, initial?, onChange, onLabel?, offLabel? })` →
+  `{ element, setValue, getValue }`. Two-state slider row over
+  `createSliderRow` (min=0, max=1, step=1) with an `on`/`off` readout
+  and a boolean `onChange`. For binary export-config switches that
+  should match the visual style of the other slider rows rather than
+  a checkbox.
 - `createActionMenu({ anchor, items, onClose? })` →
   `{ element, close }`. Pop-up dropdown anchored under `anchor` (a
   trigger element); `items` is an array of `{ label, onSelect }`,
@@ -239,7 +245,8 @@ POST /api/export/text    { target: 'strudel',
 POST /api/export/binary  { target: 'ot-basic'|'ot-doom'|'torso-s4',
                            payload, name?, seed?,
                            probability? (ot-basic),
-                           source? (torso-s4: 'json'|'wav') }
+                           source? (torso-s4: 'json'|'wav'),
+                           split_stems? (ot-basic / ot-doom: bool, default true) }
 ```
 
 Response is the artifact bytes/text; the filename lives in
@@ -281,7 +288,10 @@ OT targets need per-stem decomposition and are JSON-only).
 The OT targets render each break **per drum stem** (kick / snare /
 hat) by filtering the JSON's matched_hits per drum type. Stems map
 to OT tracks T1, T2, T3 — each gets its own DJ_EQ + COMPRESSOR for
-independent shaping, sharing CHORUS + DELAY on T8.
+independent shaping, sharing CHORUS + DELAY on T8. Set the
+`split_stems` request field to `false` (the tempera UI exposes a
+toggle) to render one mixed sample per break onto T1 only — useful
+for A/B-ing the OT export against the Strudel source.
 
 JSON-mode rendering pulls one-shots from the `wol-samplebank` S3
 bucket (`s3://wol-samplebank/samples/`) and mirrors them to

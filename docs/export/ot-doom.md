@@ -10,10 +10,16 @@ payload to `POST /api/export/binary` (`target='ot-doom'`); the server
 calls `app.export.octatrack.ot_doom.render.render()` and streams the
 project zip back. Browser saves to `~/Downloads/<name>.ot-doom.zip`.
 
-JSON-source rendering only — each break is rendered as three drum
-stems (kick / snare / hat) via beatwav at 44.1 kHz, then stacked into
-one packed sample per chain position so T1, T2, T3 each play their
-own stem under independent scene drives.
+JSON-source rendering only. Two stem modes (controlled by the
+request's `split_stems` field, default `true`):
+
+* **`split_stems=true`** — each break is rendered as three drum stems
+  (kick / snare / hat) via beatwav at 44.1 kHz, stacked into one
+  packed sample per chain position; T1/T2/T3 each play their own stem
+  under independent scene drives.
+* **`split_stems=false`** — each break is rendered as one mixed
+  sample; T1 alone plays it. Used to A/B audio fidelity against the
+  Strudel source.
 
 ## Two readings of "Megabreak of Doom"
 
@@ -132,8 +138,8 @@ total per cell).
 
 ### Step 3 — Build N packed matrix chains per row
 
-Given N input cell-renders per drum stem (so `3 * N` audios total),
-each one bar long:
+Given N input cell-renders per drum stem (`3 * N` audios total in
+split mode, `1 * N` in mixed mode), each one bar long:
 
 1. Slice every per-stem `input[k]` into N equal segments — segment
    duration = `bar_ms / N`. With N=4 and 1 bar = 1875 ms (at 128
@@ -144,43 +150,41 @@ each one bar long:
                        ++ input_1[stem].segment[k]
                        ++ ...
                        ++ input_{N-1}[stem].segment[k]
-                       ++ input_{N-1}[stem].segment[k]   ← +1 duplicate
    ```
-   Each per-stem block: `(N + 1)` segments long, `(N + 1) × bar_ms / N` ms.
-3. Stack all three stems into one packed chain in fixed order
-   (kick, snare, hat):
+   Each per-stem block: `N` segments long, `bar_ms` total.
+3. Stack the per-stem blocks into one packed chain in fixed order
+   (kick, snare, hat in split mode; the single mixed block in mixed
+   mode):
    ```
    chain[k] = stem_chain['kick'][k]
             ++ stem_chain['snare'][k]
             ++ stem_chain['hat'][k]
    ```
-   `chain[k]` length = `3 * (N + 1) * bar_ms / N`. For N=16 and
-   `bar_ms = 1875`, that's 3 × 17 × 117.2 ms ≈ 5977 ms.
-4. Each packed chain gets exactly `3 * (N + 1)` equal slice markers
-   — kick block at slices 0..N, snare at N+1..2N+1, hat at
-   2N+2..3N+2. Per-track scenes on part 1 address each block.
-
-The `+1` per stem is the crossfader-uniformity duplicate — see
-"Crossfader uniformity" below.
+   `chain[k]` length = `len(stems) * bar_ms`. For split-mode N=16 and
+   `bar_ms = 1875`, that's 3 × 1875 = 5625 ms.
+4. Each packed chain gets exactly `len(stems) * N` equal slice markers
+   — in split mode kick block at slices `0..N-1`, snare at
+   `N..2N-1`, hat at `2N..3N-1`. Per-track scenes on part 1 address
+   each block.
 
 ### Step 4 — Bind packed chains to flex slots
 
 Each packed chain → one flex slot via `project.add_sample(path,
 slot_type='FLEX')`. N slots per row across the whole project; the
 flex pool ceiling is **128 slots** and is validated up-front. Total
-slots = sum of `|C|` across all rows. Slot count matches the old
-mixed-stem version because we pack the three stems into one slot.
-Worst-case dense packs:
+slots = sum of `|C|` across all rows. Slot count is the same in
+mixed and split modes — split mode packs the three stems into one
+slot per chain position. Worst-case dense packs:
 
 - 16 rows × `|C|=8` = 128 slots — at the ceiling, accepted.
 - 17 rows × `|C|=8` = 136 — rejected with an explicit message.
 - 16 rows × `|C|=16` = 256 — rejected.
 
-Slice-marker math sanity (must stay ≤ 64 per sample):
+Slice-marker math sanity (must stay ≤ 64 per sample, split mode):
 
-- `|C|=4`  → 3 × 5  = 15 slices/slot ✓
-- `|C|=8`  → 3 × 9  = 27 slices/slot ✓
-- `|C|=16` → 3 × 17 = 51 slices/slot ✓
+- `|C|=4`  → 3 × 4  = 12 slices/slot ✓
+- `|C|=8`  → 3 × 8  = 24 slices/slot ✓
+- `|C|=16` → 3 × 16 = 48 slices/slot ✓
 
 In practice tempera exports are 1–4 rows × `|C|=4..8`, well under.
 
@@ -193,71 +197,50 @@ Pattern length 16 steps (1 bar at 1/16). Trigs at every step `1 + k *
 - N=8 → trigs at 1, 3, 5, 7, 9, 11, 13, 15
 - N=16 → trig at every step
 
-T1, T2, T3 all fire at the same N positions, all sample-locked to
-the same packed slot for that chain. **No** per-trig `slice_index`
-lock on any track — that would override the per-track scene drive
-and was the bug in the original ot-doom redesign.
+In split mode T1, T2, T3 all fire at the same N positions, all
+sample-locked to the same packed slot for that chain. In mixed mode
+only T1 fires. **No** per-trig `slice_index` lock on any track —
+that would override the scene drive and was the bug in the original
+ot-doom redesign.
 
 Part 1 setup (configured once per bank, shared by all the bank's
 patterns):
 
-- `t<i>.configure_flex(default_slot)` for each of T1, T2, T3 —
+- `t<i>.configure_flex(default_slot)` for each enabled track —
   default only used when a step has no `sample_lock`, which never
   happens in our patterns.
-- `t<i>.setup.slice = SliceMode.ON` for each of T1, T2, T3.
-- `t<i>.fx1_type = DJ_EQ`, `t<i>.fx2_type = COMPRESSOR` for T1-T3.
+- `t<i>.setup.slice = SliceMode.ON` for each enabled track.
+- `t<i>.fx1_type = DJ_EQ`, `t<i>.fx2_type = COMPRESSOR` for each
+  enabled track.
 - `t8.fx1_type = CHORUS` (`.mix = 64`), `t8.fx2_type = DELAY`
   (`.send = 64`). Different param names for the two effects because
   they expose different wet controls in octapy.
 
 Per-track scenes on part 1 (shared across the bank's patterns):
 
-- T1 (kick):  `scene(1).track(1).slice_index = 0`,            `scene(2).track(1).slice_index = N`
-- T2 (snare): `scene(1).track(2).slice_index = N + 1`,        `scene(2).track(2).slice_index = 2N + 1`
-- T3 (hat):   `scene(1).track(3).slice_index = 2N + 2`,       `scene(2).track(3).slice_index = 3N + 2`
+- Split mode:
+  - T1 (kick):  `scene(1).track(1).slice_index = 0`,         `scene(2).track(1).slice_index = N - 1`
+  - T2 (snare): `scene(1).track(2).slice_index = N`,         `scene(2).track(2).slice_index = 2N - 1`
+  - T3 (hat):   `scene(1).track(3).slice_index = 2N`,        `scene(2).track(3).slice_index = 3N - 1`
+- Mixed mode:
+  - T1:         `scene(1).track(1).slice_index = 0`,         `scene(2).track(1).slice_index = N - 1`
 - `active_scene_a = 0; active_scene_b = 1`
 
-For each track the crossfader interpolates raw STRT from
-`2 * (track_idx * (N+1))` (scene A) to `2 * (track_idx * (N+1) + N)`
-(scene B). The lerp covers each input in its own 1/N-th of the
-fader within that stem's slice block — same input `s` is reached on
-all three tracks at fader fraction `s/N`, so the kick / snare / hat
-audio of input `s` plays in lock-step. See "Crossfader uniformity"
-below for why each block needs the `+1`.
+For each enabled track the crossfader interpolates raw STRT from
+`2 * (track_idx * N)` (scene A) to `2 * (track_idx * N + (N - 1))`
+(scene B). Same input `s` is reached on all enabled tracks at the
+same fader fraction so the kit pieces of input `s` play in lock-step.
 
-### Crossfader uniformity — why each stem block needs +1
-
-The Octatrack's STRT parameter is 0..127 (7-bit) but only addresses
-64 slices, so each slice spans 2 raw STRT values: slice 0 = raw 0,
-slice 1 = raw 2, ..., slice S = raw 2S. The live raw value while
-crossfading is `lerp(raw_A, raw_B, f)` for fader fraction `f`, and
-the played slice is `floor(raw_live / 2)`.
-
-For N inputs per stem, we want each input to occupy a uniform
-1/N-th of the fader — i.e. transitions at fader fractions
-1/N, 2/N, ..., (N-1)/N. Given each stem's scene A = first slice of
-its block (raw `2 * track_idx * (N+1)`), what should scene B be?
-
-- **Scene B = last input slice in block (block_start + N - 1)**:
-  lerp covers a span of `2(N - 1)` raw STRT, crosses N-1 boundaries —
-  the last input only sounds at the rightmost fader position (a
-  single notch); the others are squeezed left.
-- **Scene B = block_start + N (raw `2 * (track_idx * (N+1) + N)`)**:
-  lerp covers a span of `2N` raw STRT, crosses N boundaries at
-  fractions 1/N, 2/N, ..., (N-1)/N exactly. Uniform.
-
-Slice `block_start + N` doesn't naturally exist (each stem block
-holds N inputs), so `build_matrix_chain` appends one extra segment
-per stem — a duplicate of `input_{N-1}[stem].segment[k]` — and
-`set_equal_slices` writes `3 * (N + 1)` markers per packed slot.
-Each track's scene B then lands on real audio that sounds identical
-to its stem's last input, giving the right fader feel on every
-track without requiring undocumented OT clamping behaviour.
-
-Cost: each stem block grows by one segment, so the packed slot is
-`(N + 1) / N` longer than the strictly-`N`-input version (~25% for
-N=4, ~12% for N=8, ~6% for N=16). Trade looks fine for any
-reasonable N.
+> **Note on uniformity** — an earlier design used `N + 1` slices per
+> stem (with the last segment a duplicate of input N-1) so the
+> crossfader's STRT lerp would cross N boundaries at exact 1/N
+> fractions assuming `slice = floor(raw / 2)`. That math turned out
+> not to match the device's behaviour empirically (transitions
+> landed off the predicted positions and the duplicate slot read as
+> a phantom "extra input"). The current design uses N slices and the
+> straightforward range `0 .. N - 1` — accepting whatever
+> non-uniformity the device's actual lerp/round mode introduces in
+> exchange for a chain that matches what the user sees on screen.
 
 ## Audio dependencies
 

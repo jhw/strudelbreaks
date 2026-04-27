@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Render a tempera captures JSON export into an Octatrack megabreak-of-doom
-project zip — cell-input variant, per-track stems.
+project zip — cell-input variant.
 
 Each non-empty row of the captures becomes one OT pattern. Patterns
 are packed 16 per bank: rows 1..16 → bank 1 patterns 1..16, rows
@@ -11,29 +11,36 @@ Within a bank every pattern shares part 1 — and therefore the part's
 scenes — so every row in a bank must have the same `|C|` (cells per
 row). The validator rejects mixed-`|C|` banks with a clear message.
 
-Per-track design: each break is rendered as three drum stems (kick /
-snare / hat) via beatwav. For each chain position k, the per-stem
-chains are stacked into one packed sample of `3 * (|C| + 1)` slices —
-kick chain (slices 0..|C|), snare chain (slices |C|+1..2|C|+1), hat
-chain (slices 2|C|+2..3|C|+2). T1, T2, T3 each sample-lock to the
-same packed slot; per-track scene values address each stem's slice
-range so the crossfader sweeps each kit piece independently.
+Two stem modes (controlled by `split_stems`, defaults True):
 
-Per-track scenes on part 1 (shared across the bank's patterns):
+* **`split_stems=True`** (default): each break is rendered as three
+  drum stems (kick / snare / hat) via beatwav. For each chain position
+  k, the per-stem chains are stacked into one packed sample of
+  `3 * |C|` slices — kick block (slices 0..|C|-1), snare block
+  (slices |C|..2|C|-1), hat block (slices 2|C|..3|C|-1). T1, T2, T3
+  each sample-lock to the same packed slot; per-track scene values
+  address each stem's slice range so the crossfader sweeps each kit
+  piece independently.
 
-  T1 (kick):  scene A slice_index = 0,         scene B slice_index = |C|
-  T2 (snare): scene A slice_index = |C| + 1,   scene B slice_index = 2|C| + 1
-  T3 (hat):   scene A slice_index = 2|C| + 2,  scene B slice_index = 3|C| + 2
+  Per-track scenes on part 1 (shared across the bank's patterns):
 
-The `+1` per stem is the crossfader-uniformity duplicate — see
-`docs/export/ot-doom.md` "Crossfader uniformity".
+    T1 (kick):  scene A slice_index = 0,         scene B slice_index = |C| - 1
+    T2 (snare): scene A slice_index = |C|,       scene B slice_index = 2|C| - 1
+    T3 (hat):   scene A slice_index = 2|C|,      scene B slice_index = 3|C| - 1
+
+* **`split_stems=False`**: each break is rendered as one mixed sample.
+  Each chain holds the |C| segments of the cells' mixed audio, T1
+  alone plays it, scenes A/B sweep across `slice_index = 0` ↔
+  `|C| - 1`. Use this for an A/B fidelity check against the Strudel
+  source.
 
 Project flex pool is 128 slots. Total chain count = sum(`|C|` per
-row) and is validated up-front — same as the mixed-stem version,
-since stacking stems into one packed slot preserves the slot count.
+row) and is validated up-front — independent of stem mode, since the
+split-mode chain packs the three stems into one slot.
 
 FX layout (configured once on part 1):
-  T1, T2, T3: FX1 = DJ_EQ, FX2 = COMPRESSOR
+  T1, T2, T3: FX1 = DJ_EQ, FX2 = COMPRESSOR     (split mode)
+  T1 only:    FX1 = DJ_EQ, FX2 = COMPRESSOR     (mixed mode)
   T8:         FX1 = CHORUS,  FX2 = DELAY        (mix = 64 each)
 
 This differs from the forum-canonical megabreak (which crossfades
@@ -74,10 +81,25 @@ from .audio import (
 )
 
 
-# Per-drum stems we ask beatwav to produce. Maps to OT audio tracks
-# 1/2/3 with per-track scenes addressing each stem's slice range
-# inside the packed chain slot.
+# Per-drum stems we ask beatwav to produce in split mode. Maps to OT
+# audio tracks 1/2/3 with per-track scenes addressing each stem's
+# slice range inside the packed chain slot.
 TRACKS = ('kick', 'snare', 'hat')
+
+# Mixed-mode pseudo-stem: one mixed render bound to T1 only. Same
+# downstream cache/key shape as split mode so the per-stem helpers
+# don't have to branch.
+MIXED_STEM = 'mixed'
+
+
+def _stem_tracks(split_stems):
+    """OT audio-track stems used for this render.
+
+    Split mode: three stems on T1/T2/T3. Mixed mode: one combined
+    stem on T1 only — useful for an A/B fidelity check against the
+    Strudel source.
+    """
+    return TRACKS if split_stems else (MIXED_STEM,)
 
 # Source break wavs are 32 steps (2 bars at 1/16). N_SLICES=16 cuts them
 # into 16 slices of 2 steps each — same scheme as the existing octatrack
@@ -118,25 +140,28 @@ def set_equal_slices(project, slot, n_slices, segment_ms, sample_rate):
     project.markers.set_slot(slot, slot_markers, is_static=False)
 
 
-def _ensure_track_slices(name, track, source_slice_cache):
-    """Lazy-load equal_slices for one (break, drum-stem) pair. Cache
-    keyed by (name, track) so repeat references inside a row are free."""
-    key = (name, track)
+def _ensure_track_slices(name, stem, source_slice_cache):
+    """Lazy-load equal_slices for one (break, stem) pair. Cache keyed
+    by (name, stem) so repeat references inside a row are free.
+
+    `stem` is one of TRACKS in split mode or MIXED_STEM in mixed mode;
+    the cache layout is the same either way."""
+    key = (name, stem)
     if key in source_slice_cache:
         return
-    path = source_slice_cache['__paths__'][name][track]
+    path = source_slice_cache['__paths__'][name][stem]
     seg = load_break(path)
     source_slice_cache[key] = equal_slices(seg, N_SLICES)
 
 
-def _per_track_source_slices(source_slice_cache, track):
-    """View into the cache that exposes only one drum stem's slices,
-    keyed by name — what `render_cell_audio` expects. The reserved
+def _per_stem_source_slices(source_slice_cache, stem):
+    """View into the cache that exposes only one stem's slices, keyed
+    by name — what `render_cell_audio` expects. The reserved
     `'__paths__'` entry holds the path map and is skipped."""
     return {
         key[0]: slices
         for key, slices in source_slice_cache.items()
-        if isinstance(key, tuple) and key[1] == track
+        if isinstance(key, tuple) and key[1] == stem
     }
 
 
@@ -146,50 +171,50 @@ def _render_row_chains(
     pattern_num,
     cells,
     events_per_cycle,
+    stem_tracks,
     source_slice_cache,
     bank_render_dir,
 ):
-    """Render a row's audio per drum stem, stack into per-position
-    packed chains, write WAVs, register flex slots.
+    """Render a row's audio per stem, stack into per-position packed
+    chains, write WAVs, register flex slots.
 
     Returns the per-chain-position flex slot list. Caller wires the
     slots into the pattern's trigs (one trig per chain position fires
-    on each of T1/T2/T3 sample-locked to the same packed slot).
+    on each enabled OT track sample-locked to the same packed slot).
     """
     n = len(cells)
 
     # Lazy-load per-stem source slices for every break in this row.
     for cell in cells:
         for name in cell['break']:
-            for track in TRACKS:
-                _ensure_track_slices(name, track, source_slice_cache)
+            for stem in stem_tracks:
+                _ensure_track_slices(name, stem, source_slice_cache)
 
     anchor_slice = next(s[0] for k, s in source_slice_cache.items()
                         if k != '__paths__')
     sample_rate = anchor_slice.frame_rate
 
-    # Render each cell to one bar of audio per drum stem.
-    per_track_inputs = {}
-    for track in TRACKS:
-        track_slices = _per_track_source_slices(source_slice_cache, track)
-        per_track_inputs[track] = [
-            render_cell_audio(cell, track_slices, events_per_cycle)
+    # Render each cell to one bar of audio per stem.
+    per_stem_inputs = {}
+    for stem in stem_tracks:
+        stem_slices = _per_stem_source_slices(source_slice_cache, stem)
+        per_stem_inputs[stem] = [
+            render_cell_audio(cell, stem_slices, events_per_cycle)
             for cell in cells
         ]
 
-    bar_ms = len(per_track_inputs[TRACKS[0]][0])
+    bar_ms = len(per_stem_inputs[stem_tracks[0]][0])
     segment_ms = bar_ms / n
-    packed_slices_per_chain = len(TRACKS) * (n + 1)
+    packed_slices_per_chain = len(stem_tracks) * n
 
-    # Build N packed chains and bind each as a flex slot. Each packed
-    # chain holds `len(TRACKS) * (n + 1)` segments — one (n+1)-slice
-    # block per drum stem, kick → snare → hat. Per-track scenes on
-    # part 1 address each stem's slice range. See
-    # docs/export/ot-doom.md "Crossfader uniformity" for the rationale.
+    # Build N packed chains and bind each as a flex slot. Split mode:
+    # one n-slice block per stem (kick → snare → hat). Mixed mode: a
+    # single n-slice chain. Per-track scenes on part 1 address each
+    # stem's slice range.
     bank_render_dir.mkdir(parents=True, exist_ok=True)
     flex_slots = []
     for k in range(n):
-        chain_seg = build_matrix_chain(per_track_inputs, list(TRACKS), k, n)
+        chain_seg = build_matrix_chain(per_stem_inputs, list(stem_tracks), k, n)
         wav_path = (bank_render_dir
                     / f'b{bank_num:02d}_p{pattern_num:02d}_chain{k:02d}.wav')
         export_wav(chain_seg, wav_path)
@@ -202,16 +227,16 @@ def _render_row_chains(
     return flex_slots
 
 
-def _configure_pattern(bank, pattern_num, flex_slots, n):
-    """Write a single pattern: N trigs at 16/N spacing on each of
-    T1/T2/T3, all sample-locked to the same packed slot for that
-    chain position. No per-trig slice_index lock — trigs inherit the
+def _configure_pattern(bank, pattern_num, flex_slots, n, n_ot_tracks):
+    """Write a single pattern: N trigs at 16/N spacing on every enabled
+    OT track, all sample-locked to the same packed slot for that chain
+    position. No per-trig slice_index lock — trigs inherit the
     per-track slice_index from the active scene on part 1."""
     interval = N_PATTERN_STEPS // n
     pattern = bank.pattern(pattern_num)
     pattern.scale_length = N_PATTERN_STEPS
     active_steps = [k * interval + 1 for k in range(n)]
-    for track_idx in range(len(TRACKS)):
+    for track_idx in range(n_ot_tracks):
         track = pattern.audio_track(track_idx + 1)
         track.active_steps = active_steps
         for k, step_num in enumerate(active_steps):
@@ -219,31 +244,31 @@ def _configure_pattern(bank, pattern_num, flex_slots, n):
             step.sample_lock = flex_slots[k]
 
 
-def _configure_part(part, default_packed_slot, n):
+def _configure_part(part, default_packed_slot, n, n_ot_tracks):
     """Configure part 1 once per bank.
 
-    T1/T2/T3 all sample-play from the same packed slots but with
-    per-track scene values addressing each stem's slice range. T1-T3
+    Each enabled OT track sample-plays from the same packed slots, with
+    per-track scene values addressing that stem's slice range. T1..Tk
     take DJ_EQ + COMPRESSOR; T8 hosts CHORUS + DELAY at mix=64 as the
     project-level send chain.
     """
-    for track_idx in range(len(TRACKS)):
+    for track_idx in range(n_ot_tracks):
         t = part.audio_track(track_idx + 1)
         t.configure_flex(default_packed_slot)
         t.setup.slice = SliceMode.ON
         t.fx1_type = FX1Type.DJ_EQ
         t.fx2_type = FX2Type.COMPRESSOR
 
-    # Per-track scenes — each stem occupies n+1 contiguous slices in
-    # the packed slot. Track i sweeps slice_index `i*(n+1) → i*(n+1)+n`,
-    # which under the linear lerp of raw STRT covers each input in its
-    # own 1/n-th of the fader cleanly.
-    block = n + 1
-    for track_idx in range(len(TRACKS)):
+    # Per-track scenes — each stem occupies n contiguous slices in the
+    # packed slot. Track i sweeps slice_index `i*n → i*n + (n - 1)`.
+    # The OT crossfader interpolates raw STRT (= slice_index * 2)
+    # between scene A and scene B; with this range each input segment
+    # is reachable on its own band of the fader.
+    for track_idx in range(n_ot_tracks):
         scene_a = part.scene(1).track(track_idx + 1)
         scene_b = part.scene(2).track(track_idx + 1)
-        scene_a.slice_index = track_idx * block
-        scene_b.slice_index = track_idx * block + n
+        scene_a.slice_index = track_idx * n
+        scene_b.slice_index = track_idx * n + (n - 1)
     part.active_scene_a = 0
     part.active_scene_b = 1
 
@@ -259,14 +284,15 @@ def render_bank(
     bank_num,
     rows,
     events_per_cycle,
+    stem_tracks,
     source_slice_cache,
     bank_render_dir,
 ):
     """Render up to PATTERNS_PER_BANK rows into one OT bank.
 
     All rows in the bank must share the same `|C|` — every pattern in
-    the bank shares part 1's per-track scene config (each track's
-    `slice_index` 0 / `|C|`, offset by `track_idx * (|C| + 1)`),
+    the bank shares part 1's per-track scene config (each enabled
+    track's `slice_index` 0 .. |C| - 1, offset by `track_idx * |C|`),
     which is `|C|`-dependent. Mixed-`|C|` banks fail loudly.
     """
     if not rows:
@@ -296,23 +322,51 @@ def render_bank(
     for pattern_idx, cells in enumerate(rows):
         slots = _render_row_chains(
             project, bank_num, pattern_idx + 1, cells,
-            events_per_cycle, source_slice_cache, bank_render_dir,
+            events_per_cycle, stem_tracks,
+            source_slice_cache, bank_render_dir,
         )
         pattern_slots.append(slots)
 
     bank = project.bank(bank_num)
     part = bank.part(1)
+    n_ot_tracks = len(stem_tracks)
     # Default flex slot is the first chain of the first pattern — only
     # used when a step has no sample_lock, which never happens in our
     # patterns.
-    _configure_part(part, pattern_slots[0][0], n)
+    _configure_part(part, pattern_slots[0][0], n, n_ot_tracks)
 
     # Write each pattern with its own chain trigs.
     for pattern_idx, slots in enumerate(pattern_slots):
-        _configure_pattern(bank, pattern_idx + 1, slots, n)
+        _configure_pattern(bank, pattern_idx + 1, slots, n, n_ot_tracks)
 
 
-def build_project(export_path, name, *, render_dir=None):
+def _resolve_stem_paths(*, gist_user, gist_id, names, target_bpm, stem_tracks):
+    """Fetch break audio in the layout `_render_row_chains` expects:
+    `{name: {stem: path}}`. Split mode delegates to the per-track JSON
+    renderer; mixed mode delegates to the regular flat resolver and
+    re-shapes to the per-stem cache layout."""
+    if stem_tracks == (MIXED_STEM,):
+        flat = sample_source.resolve_break_paths(
+            gist_user=gist_user,
+            gist_id=gist_id,
+            names=names,
+            source='json',
+            target_bpm=target_bpm,
+            target_sample_rate=OT_SAMPLE_RATE,
+        )
+        return {n: {MIXED_STEM: p} for n, p in flat.items()}
+    return sample_source.resolve_break_paths(
+        gist_user=gist_user,
+        gist_id=gist_id,
+        names=names,
+        source='json',
+        target_bpm=target_bpm,
+        target_sample_rate=OT_SAMPLE_RATE,
+        tracks=stem_tracks,
+    )
+
+
+def build_project(export_path, name, *, split_stems=True, render_dir=None):
     payload, ctx = load_export(export_path, REQUIRED_CTX)
     if ctx['nSlices'] != N_SLICES:
         sys.exit(f'nSlices {ctx["nSlices"]} != {N_SLICES} (ot-doom assumes 16)')
@@ -329,9 +383,9 @@ def build_project(export_path, name, *, render_dir=None):
         )
 
     # Total chain slots over the whole project. The OT flex pool is
-    # shared across banks, so this is a project-wide ceiling. The
-    # per-track packing puts all three stems into one slot per chain
-    # position, so slot counts match the mixed-stem version.
+    # shared across banks, so this is a project-wide ceiling. Mixed
+    # and split modes both use one slot per chain position (split mode
+    # packs the three stems into that slot).
     total_slots = sum(len(cells) for cells in rows_in)
     if total_slots > FLEX_SLOT_LIMIT:
         sys.exit(
@@ -347,16 +401,13 @@ def build_project(export_path, name, *, render_dir=None):
         for break_name in cell['break']
     })
 
-    # Per-stem rendering: returns {name: {kick: path, snare: path, hat: path}}.
-    # JSON-source only — the gist's pre-mixed WAVs can't be split into stems.
-    stem_paths = sample_source.resolve_break_paths(
+    stem_tracks = _stem_tracks(split_stems)
+    stem_paths = _resolve_stem_paths(
         gist_user=ctx['gistUser'],
         gist_id=ctx['gistId'],
         names=all_names,
-        source='json',
         target_bpm=ctx['bpm'],
-        target_sample_rate=OT_SAMPLE_RATE,
-        tracks=TRACKS,
+        stem_tracks=stem_tracks,
     )
 
     project = Project.from_template(name.upper()[:16])
@@ -385,6 +436,7 @@ def build_project(export_path, name, *, render_dir=None):
             bank_num,
             bank_rows,
             ctx['eventsPerCycle'],
+            stem_tracks,
             source_slice_cache,
             row_render_root / f'bank{bank_num:02d}',
         )
@@ -392,8 +444,11 @@ def build_project(export_path, name, *, render_dir=None):
     return project
 
 
-def render(export_path, name, *, output_dir=None, render_dir=None):
-    project = build_project(export_path, name, render_dir=render_dir)
+def render(export_path, name, *, split_stems=True,
+           output_dir=None, render_dir=None):
+    project = build_project(export_path, name,
+                            split_stems=split_stems,
+                            render_dir=render_dir)
     out_dir = pathlib.Path(output_dir) if output_dir is not None else OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     zip_path = out_dir / f'{name}.zip'

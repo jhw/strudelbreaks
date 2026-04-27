@@ -4,11 +4,11 @@ row.
 
 See docs/export/ot-doom.md for the design — short version: every cell
 in a row renders to one bar of audio per drum stem (kick/snare/hat),
-then chain[k] is the k-th equal segment of every cell concatenated
-(plus the +1 duplicate slice for crossfader uniformity), with the
-three per-stem chains stacked into one packed sample of 3*(N+1)
-slices. T1, T2, T3 each sample-lock to the packed slot, with per-track
-scenes addressing the kick / snare / hat slice ranges.
+then chain[k] is the k-th equal segment of every cell concatenated,
+with the three per-stem chains stacked into one packed sample of
+3*N slices. T1, T2, T3 each sample-lock to the packed slot, with
+per-track scenes addressing the kick / snare / hat slice ranges
+(stem i occupies slices i*N .. i*N + (N-1)).
 
 No fades anywhere — Strudel doesn't apply per-event or per-segment
 fades and the OT side should match it. If pathological patterns cause
@@ -102,10 +102,9 @@ def render_cell_audio(
 
 
 def _build_track_chain(input_audios: List[AudioSegment], k: int, n: int) -> AudioSegment:
-    """Per-track chain[k] = segment_k of every input concatenated, with
-    the last input's segment duplicated for crossfader uniformity.
+    """Per-track chain[k] = segment_k of every input concatenated.
 
-    Total `n + 1` slices per track. Internal helper — callers want
+    Total `n` slices per track. Internal helper — callers want
     `build_matrix_chain` which stacks one of these per drum track.
     """
     bar_ms = len(input_audios[0])
@@ -115,7 +114,6 @@ def _build_track_chain(input_audios: List[AudioSegment], k: int, n: int) -> Audi
     out = AudioSegment.empty()
     for inp in input_audios:
         out += inp[start_ms:end_ms]
-    out += input_audios[-1][start_ms:end_ms]
     return out
 
 
@@ -130,13 +128,7 @@ def build_matrix_chain(
     `per_track_inputs[track]` is the list of N per-cell audios for one
     drum stem; every track must contribute the same N at the same bar
     length. The output is the kick chain, then snare, then hat,
-    concatenated — `3 * (n + 1)` slices total when `tracks` has all
-    three stems.
-
-    The crossfader-uniformity duplicate is added per track inside
-    `_build_track_chain`, so each track section sweeps its own
-    1/n-th of the fader cleanly. See docs/export/ot-doom.md
-    "Crossfader uniformity" for the per-track scene math.
+    concatenated — `len(tracks) * n` slices total.
 
     No fades — segment boundaries lie inside whatever envelope
     `render_cell_audio` produced and any extra here would just

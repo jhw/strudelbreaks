@@ -26,16 +26,24 @@ it to every captured trig on every track. See
 
 ## Per-track stems
 
-Each break is rendered as three drum stems (kick / snare / hat) via
-beatwav, each filtered to one drum type before mixdown. Stems map to
-OT audio tracks T1, T2, T3 — same trig pattern on all three (same
-step positions, same `slice_index` per step), distinct `sample_lock`
-per track (the per-stem flex slot). Each kit piece can be muted, EQ'd
-or compressed independently on the device.
+Two stem modes (controlled by the request's `split_stems` field,
+default `true`):
+
+* **`split_stems=true`** — each break is rendered as three drum stems
+  (kick / snare / hat) via beatwav, each filtered to one drum type
+  before mixdown. Stems map to OT audio tracks T1, T2, T3 — same trig
+  pattern on all three (same step positions, same `slice_index` per
+  step), distinct `sample_lock` per track (the per-stem flex slot).
+  Each kit piece can be muted, EQ'd or compressed independently on
+  the device.
+* **`split_stems=false`** — each break is rendered as one mixed
+  sample; T1 alone trigs and T2/T3 are left at part defaults.
+  Used to A/B audio fidelity against the Strudel source.
 
 JSON-source rendering only — there's no way to decompose a pre-mixed
 gist WAV into stems after-the-fact, so any break missing its
-`{name}.json` in the gist fails loudly.
+`{name}.json` in the gist fails loudly. Mixed mode is also
+JSON-rendered so the same BPM-correct re-render path is used.
 
 ## FX layout
 

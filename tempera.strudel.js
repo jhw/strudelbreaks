@@ -313,15 +313,27 @@ function downloadAs(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+// Per-target export config. Captured here (not on the request body
+// itself) because the toggle UI lives outside the export menu — when
+// the user picks 'ot-basic' / 'ot-doom' we read the current state of
+// these knobs at send time.
+const exportConfig = {
+  splitStems: true,  // OT split-stems mode (T1=kick / T2=snare / T3=hat)
+};
+
 async function exportViaServer(spec) {
   const endpointPath = spec.kind === 'text'
     ? '/api/export/text'
     : '/api/export/binary';
+  const body = {
+    target: spec.target,
+    payload: capturesPayload,
+  };
+  if (spec.target === 'ot-basic' || spec.target === 'ot-doom') {
+    body.split_stems = exportConfig.splitStems;
+  }
   try {
-    const { filename, blob } = await postExport(endpointPath, {
-      target: spec.target,
-      payload: capturesPayload,
-    });
+    const { filename, blob } = await postExport(endpointPath, body);
     downloadAs(blob, filename);
   } catch (e) {
     console.error('[tempera] export failed:', e);
@@ -350,9 +362,24 @@ const exportBtn = SB.ui.createButton('export ▾', function (e) {
     onClose: () => { exportMenu = null; },
   });
 });
+// Export-config panel: per-target switches read by the export action
+// menu. Stays visible above the captures toolbar so the toggle is in
+// the same visual cluster as the export button.
+const exportConfigPanel = SB.ui.createCornerPanel({
+  corner: 'top-right', id: 'export-config',
+  stack: 'log-display',
+  style: 'min-width:340px;max-width:520px',
+});
+const splitStemsToggle = SB.ui.createToggleRow({
+  label: 'split stems',
+  initial: exportConfig.splitStems,
+  onChange: (v) => { exportConfig.splitStems = v; },
+});
+exportConfigPanel.element.appendChild(splitStemsToggle.element);
+
 const capturesToolbar = SB.ui.createButtonBar({
   corner: 'top-right', id: 'captures-toolbar',
-  stack: 'log-display',
+  stack: 'export-config',
   buttons: [
     SB.ui.createButton('new row', newRow),
     exportBtn,

@@ -416,6 +416,31 @@
     };
   }
 
+  // Two-state toggle styled as a slider row. Thin convenience over
+  // createSliderRow with min=0, max=1, step=1 and an on/off readout.
+  // `initial` is a boolean; `onChange(boolean)` fires on flip;
+  // `setValue(boolean)` snaps without firing onChange.
+  // Useful for binary export-config switches the user wants to look
+  // and feel like the other slider controls (rather than a checkbox).
+  function createToggleRow({
+    label, initial = false, onChange,
+    onLabel = 'on', offLabel = 'off',
+  }) {
+    const fmt = (v) => (v ? onLabel : offLabel);
+    const row = createSliderRow({
+      label, min: 0, max: 1, step: 1,
+      initial: initial ? 1 : 0,
+      onChange: onChange ? (v) => onChange(!!v) : undefined,
+      format: fmt,
+      width: Math.max(onLabel.length, offLabel.length),
+    });
+    return {
+      element: row.element,
+      setValue(v) { row.setValue(v ? 1 : 0); },
+      getValue() { return !!row.getValue(); },
+    };
+  }
+
   // Pop-up action menu anchored to a trigger element. Returns
   // `{ element, close }`; the menu is appended to document.body and
   // dismisses itself when the user clicks outside it (the dismiss
@@ -448,10 +473,12 @@
     menu.dataset.role = 'action-menu';
 
     const r = anchor.getBoundingClientRect();
+    // z-index sits above corner panels (which use 99999) so the menu
+    // is never occluded when stacked widgets render below the trigger.
     menu.style.cssText =
       'position:fixed;top:' + (r.bottom + 4) + 'px;'
       + 'right:' + (window.innerWidth - r.right) + 'px;'
-      + 'background:#0a0a0a;border:1px solid #1f3f1f;padding:6px;z-index:9999;'
+      + 'background:#0a0a0a;border:1px solid #1f3f1f;padding:6px;z-index:100000;'
       + 'display:flex;flex-direction:column;gap:4px;';
 
     let closed = false;
@@ -561,7 +588,7 @@
     mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
     util:  { meanIndex, thinByUniforms },
     hex:   { hex2, hexPad, arrayHex },
-    ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createSliderRow, createSliderPanel, createActionMenu, resetUI },
+    ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createSliderRow, createSliderPanel, createToggleRow, createActionMenu, resetUI },
     store: { createPersistedStore, downloadBlob },
   };
 });

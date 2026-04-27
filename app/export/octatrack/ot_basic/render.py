@@ -50,9 +50,17 @@ from app.export.common import sample_source
 from app.export.common.devices import OT_SAMPLE_RATE
 from app.export.common.schema import load_export
 
-# Per-drum stems we ask beatwav to produce. Maps to OT audio tracks
-# 1/2/3 in trig order.
+# Per-drum stems we ask beatwav to produce in split mode. Maps to OT
+# audio tracks 1/2/3 in trig order. Mixed mode renders one combined
+# sample per break and uses T1 only — useful for an A/B fidelity
+# check against the Strudel source.
 TRACKS = ('kick', 'snare', 'hat')
+MIXED_STEM = 'mixed'
+
+
+def _stem_tracks(split_stems):
+    """OT audio-track stems used for this render."""
+    return TRACKS if split_stems else (MIXED_STEM,)
 
 # Source break wavs are 32 steps (2 bars at 1/16). N_SLICES=16 cuts them
 # into 16 slices of 2 steps each, so a slice spans an 1/8 note plus the
@@ -153,15 +161,16 @@ def collect_break_names(banks):
     return names
 
 
-def configure_track_fx(part):
+def configure_track_fx(part, n_ot_tracks):
     """Set FX layout on part 1 once per bank.
 
-    T1/T2/T3 carry the per-stem playback. Each gets DJ_EQ on FX1 and
-    COMPRESSOR on FX2 — independent EQ + dynamics per kit piece.
-    T8 hosts CHORUS (FX1) and DELAY (FX2) at mix=64 as the
-    project-level send chain.
+    Each enabled audio track (1..n_ot_tracks) gets DJ_EQ on FX1 and
+    COMPRESSOR on FX2 — independent EQ + dynamics per kit piece in
+    split mode, or just one shaping chain in mixed mode. T8 hosts
+    CHORUS (FX1) and DELAY (FX2) at mix=64 as the project-level send
+    chain.
     """
-    for track_num in (1, 2, 3):
+    for track_num in range(1, n_ot_tracks + 1):
         t = part.audio_track(track_num)
         t.fx1_type = FX1Type.DJ_EQ
         t.fx2_type = FX2Type.COMPRESSOR
@@ -173,7 +182,32 @@ def configure_track_fx(part):
     t8.fx2.send = T8_FX_LEVEL   # DELAY: wet level on .send (no .mix here)
 
 
-def build_project(export_path, name, probability=1.0):
+def _resolve_stem_paths(*, gist_user, gist_id, names, target_bpm, stem_tracks):
+    """Fetch break audio in the layout the renderer expects:
+    `{name: {stem: path}}`. Split mode returns the per-track JSON
+    render; mixed mode returns one combined sample per break."""
+    if stem_tracks == (MIXED_STEM,):
+        flat = sample_source.resolve_break_paths(
+            gist_user=gist_user,
+            gist_id=gist_id,
+            names=names,
+            source='json',
+            target_bpm=target_bpm,
+            target_sample_rate=OT_SAMPLE_RATE,
+        )
+        return {n: {MIXED_STEM: p} for n, p in flat.items()}
+    return sample_source.resolve_break_paths(
+        gist_user=gist_user,
+        gist_id=gist_id,
+        names=names,
+        source='json',
+        target_bpm=target_bpm,
+        target_sample_rate=OT_SAMPLE_RATE,
+        tracks=stem_tracks,
+    )
+
+
+def build_project(export_path, name, probability=1.0, split_stems=True):
     trig_condition = probability_to_condition(probability)
     payload, ctx = load_export(export_path, REQUIRED_CTX)
     if ctx['nSlices'] != N_SLICES:
@@ -188,51 +222,49 @@ def build_project(export_path, name, probability=1.0):
         if len(bank) > 16:
             sys.exit(f'bank {i} has {len(bank)} cells > 16')
 
+    stem_tracks = _stem_tracks(split_stems)
+    n_ot_tracks = len(stem_tracks)
+
     break_names = collect_break_names(banks_in)
-    # Per-stem rendering: returns {name: {kick: path, snare: path, hat: path}}.
-    # JSON-source only — gist's pre-mixed WAVs can't be split into stems.
-    stem_paths = sample_source.resolve_break_paths(
+    stem_paths = _resolve_stem_paths(
         gist_user=ctx['gistUser'],
         gist_id=ctx['gistId'],
         names=break_names,
-        source='json',
         target_bpm=ctx['bpm'],
-        target_sample_rate=OT_SAMPLE_RATE,
-        tracks=TRACKS,
+        stem_tracks=stem_tracks,
     )
 
     project = Project.from_template(name.upper()[:16])
     project.settings.tempo = float(ctx['bpm'])
     project.master_track = True
 
-    # Each break gets one flex slot per drum stem. Slot count grows 3×
-    # vs the old mixed-stem design — small, well under the 128-slot
-    # ceiling for tempera-realistic break counts.
-    flex_slots = {}  # {(name, track): slot}
+    # Split mode: 3 flex slots per break (kick/snare/hat), one per OT
+    # track. Mixed mode: 1 slot per break used by T1 only.
+    flex_slots = {}  # {(name, stem): slot}
     for n in break_names:
-        for track in TRACKS:
-            path = stem_paths[n][track]
+        for stem in stem_tracks:
+            path = stem_paths[n][stem]
             slot = project.add_sample(str(path.resolve()), slot_type='FLEX')
-            flex_slots[(n, track)] = slot
+            flex_slots[(n, stem)] = slot
             frames, sr = wav_info(path)
             set_equal_slices(project, slot, N_SLICES, frames, sr)
 
     # Default flex slot per track — only relevant if a step has no
     # sample_lock, which our patterns never produce; we pick the first
-    # break's stem for symmetry across the three tracks.
+    # break's stem so the default sound matches the rest of the kit.
     default_slot_per_track = {
-        track: flex_slots[(break_names[0], track)] for track in TRACKS
+        stem: flex_slots[(break_names[0], stem)] for stem in stem_tracks
     }
 
     for bank_idx, bank_cells in enumerate(banks_in):
         bank = project.bank(bank_idx + 1)
         part = bank.part(1)
 
-        for track_idx, track in enumerate(TRACKS):
+        for track_idx, stem in enumerate(stem_tracks):
             t = part.audio_track(track_idx + 1)
-            t.configure_flex(default_slot_per_track[track])
+            t.configure_flex(default_slot_per_track[stem])
             t.setup.slice = SliceMode.ON
-        configure_track_fx(part)
+        configure_track_fx(part, n_ot_tracks)
 
         for cell_idx, cell in enumerate(bank_cells):
             pattern = bank.pattern(cell_idx + 1)
@@ -245,14 +277,14 @@ def build_project(export_path, name, probability=1.0):
             )
             active = [2 * i + 1 for i, (_, s) in enumerate(events) if s is not None]
 
-            for track_idx, track in enumerate(TRACKS):
+            for track_idx, stem in enumerate(stem_tracks):
                 pattern_track = pattern.audio_track(track_idx + 1)
                 pattern_track.active_steps = active
                 for i, (n, slice_idx) in enumerate(events):
                     if slice_idx is None:
                         continue
                     step = pattern_track.step(2 * i + 1)
-                    step.sample_lock = flex_slots[(n, track)]
+                    step.sample_lock = flex_slots[(n, stem)]
                     step.slice_index = slice_idx
                     if trig_condition is not None:
                         step.condition = trig_condition
@@ -260,8 +292,11 @@ def build_project(export_path, name, probability=1.0):
     return project
 
 
-def render(export_path, name, *, probability=1.0, output_dir=None):
-    project = build_project(export_path, name, probability=probability)
+def render(export_path, name, *, probability=1.0,
+           split_stems=True, output_dir=None):
+    project = build_project(export_path, name,
+                            probability=probability,
+                            split_stems=split_stems)
     out_dir = pathlib.Path(output_dir) if output_dir is not None else OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     zip_path = out_dir / f'{name}.zip'

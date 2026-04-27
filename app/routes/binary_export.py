@@ -39,6 +39,11 @@ class BinaryExportBody(BaseModel):
     probability: float = 1.0
     # torso-s4 only
     source: str = 'json'
+    # ot-basic / ot-doom: True (default) renders kick/snare/hat onto
+    # T1/T2/T3 with independent shaping; False renders one mixed sample
+    # per break onto T1 only — used to A/B audio fidelity vs. the
+    # Strudel source.
+    split_stems: bool = True
 
 
 @router.post('/api/export/binary')
@@ -58,10 +63,12 @@ async def export_binary(body: BinaryExportBody):
             data = await asyncio.to_thread(
                 exporters.export_ot_basic, body.payload, name,
                 probability=body.probability,
+                split_stems=body.split_stems,
             )
         elif body.target == 'ot-doom':
             data = await asyncio.to_thread(
                 exporters.export_ot_doom, body.payload, name,
+                split_stems=body.split_stems,
             )
         elif body.target == 'torso-s4':
             data = await asyncio.to_thread(

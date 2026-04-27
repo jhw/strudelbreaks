@@ -200,6 +200,44 @@ class OctatrackRoundtripTest(unittest.TestCase):
         finally:
             wd.__exit__(None, None, None)
 
+    def test_mixed_mode_single_track_layout(self):
+        # split_stems=False: one mixed sample per break, T1 only.
+        # Used to A/B audio fidelity against the Strudel source.
+        render = load_render_module('octatrack/ot-basic')
+        with WorkDir() as wd:
+            paths = make_break_wavs(wd.samples, ['kk', 'sn'],
+                                    bpm=120, steps=32)
+            wd.stub_sources(paths)
+            payload = make_export([[
+                make_capture_cell(['kk', 'sn', 'kk', 'sn'],
+                                  [0, 4, 8, None, 1, 5, 9, 13]),
+            ]])
+            wd.write_export(payload)
+            render.OUTPUT_DIR = wd.root / 'out'
+            zip_path = render.render(wd.export_path, 'OTBMIX',
+                                     split_stems=False)
+            self.assertTrue(zip_path.exists())
+
+            project = Project.from_zip(zip_path)
+
+            # Two breaks → two flex slots (no per-stem multiplier).
+            for name in ('kk', 'sn'):
+                slot = project.get_slot(f'{name}.wav', slot_type='FLEX')
+                self.assertIsNotNone(slot, f'missing {name} slot')
+
+            # T1 only is configured / has trigs.
+            pattern = project.bank(1).pattern(1)
+            self.assertEqual(pattern.audio_track(1).active_steps,
+                             self.EXPECTED_ACTIVE)
+            self.assertEqual(pattern.audio_track(2).active_steps, [])
+            self.assertEqual(pattern.audio_track(3).active_steps, [])
+
+            part = project.bank(1).part(1)
+            self.assertEqual(int(part.audio_track(1).setup.slice), 1)
+            self.assertEqual(part.audio_track(1).fx1_type, FX1Type.DJ_EQ)
+            self.assertEqual(part.audio_track(1).fx2_type, FX2Type.COMPRESSOR)
+
+
     def test_invalid_probability_raises(self):
         render = load_render_module('octatrack/ot-basic')
         with WorkDir() as wd:
