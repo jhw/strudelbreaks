@@ -360,5 +360,27 @@ class StatusTest(unittest.TestCase):
             self.assertIn('BAZ-QUX', out)
 
 
+class MainNoArgsTest(unittest.TestCase):
+    """Bare `sync.py` (no subcommand) should run `status` rather than
+    error out — the destructive verbs stay explicit, but the safe
+    default is always available."""
+
+    def test_no_subcommand_runs_status(self):
+        with WorkDir() as wd:
+            wd.patch_device_paths('octatrack', wd._tmp / 'OCTATRACK',
+                                  'strudelbeats', mount=True)
+            wd.patch_device_paths('torso-s4', wd._tmp / 'S4',
+                                  'samples/strudelbeats', mount=False)
+            buf = io.StringIO()
+            old = sys.stdout
+            sys.stdout = buf
+            try:
+                sync.main([])
+            finally:
+                sys.stdout = old
+            self.assertIn('local', buf.getvalue())
+            self.assertIn('remote', buf.getvalue())
+
+
 if __name__ == '__main__':
     unittest.main()

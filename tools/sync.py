@@ -403,7 +403,10 @@ def build_parser() -> argparse.ArgumentParser:
         description=__doc__.splitlines()[0],
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    sub = ap.add_subparsers(dest='cmd', required=True)
+    # No-subcommand default is `status` — running bare `sync.py` should
+    # show what's where, never touch anything. Push/clean stay
+    # explicit so destructive intent is always typed.
+    sub = ap.add_subparsers(dest='cmd')
 
     def add_common(p):
         p.add_argument('pattern', nargs='?', default=None,
@@ -430,12 +433,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    _, spec = resolve_device(args.device)
-    if args.cmd == 'push':
+    cmd = args.cmd or 'status'
+    _, spec = resolve_device(getattr(args, 'device', None))
+    if cmd == 'push':
         push(spec, args.pattern, args.force)
-    elif args.cmd == 'status':
+    elif cmd == 'status':
         status(spec)
-    elif args.cmd == 'clean':
+    elif cmd == 'clean':
         if args.clean_what == 'local':
             clean_local(spec, args.pattern, args.force)
         elif args.clean_what == 'remote':
