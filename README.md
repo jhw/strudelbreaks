@@ -213,7 +213,7 @@ push scripts copy from there onto the device.
 | `ot-basic` | `<adj>-<noun>.ot.zip` — OT project zip, per-cell patterns, per-track stems on T1-T3 | [docs/export/octatrack.md](docs/export/octatrack.md) |
 | `ot-doom` | `<adj>-<noun>.ot.zip` — OT project zip, megabreak-of-doom matrix chains, per-track stems on T1-T3 | [docs/export/ot-doom.md](docs/export/ot-doom.md) |
 | `torso-s4` | `<adj>-<noun>.s4.zip` — Torso S-4 sample bundle, one mixed WAV per row | [docs/export/torso-s4.md](docs/export/torso-s4.md) |
-| `strudel` | `<adj>-<noun>.strudel.js` — standalone playback template | [docs/export/strudel.md](docs/export/strudel.md) |
+| `strudel` | opens [strudel.cc](https://strudel.cc/) in a new tab and copies the rendered template to your clipboard — paste to play | [docs/export/strudel.md](docs/export/strudel.md) |
 | `json` | `tempera-captures-<gistId>-<stamp>.json` — raw payload, browser-side download (no server) | — |
 
 Both OT variants land at `.ot.zip` — the device-side tooling treats

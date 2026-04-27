@@ -240,12 +240,32 @@ def extract_project(zip_path: pathlib.Path, dest_root: pathlib.Path) -> int:
     return sample_count
 
 
+def _ensure_remote_root(spec: dict) -> None:
+    """Make sure the device's strudelbeats subdir exists.
+
+    Only ever creates entries *inside* an already-mounted volume —
+    never the volume entry itself. mkdir(parents=True) on
+    `/Volumes/OCTATRACK/strudelbeats` would, in a TOCTOU race with
+    the device unmounting, silently create `/Volumes/OCTATRACK/`
+    as a regular folder under macOS's /Volumes mount root. That
+    leaves a mystery directory that can shadow the next mount.
+    Walking volume → remote_root component-by-component (no
+    parents=True) makes the failure mode loud instead of silent.
+    """
+    volume = spec['volume']
+    if volume is None or not volume.exists():
+        sys.exit(f'device not mounted at {volume}')
+    cur = volume
+    for part in spec['remote_root'].relative_to(volume).parts:
+        cur = cur / part
+        if not cur.exists():
+            cur.mkdir()
+
+
 def push(spec: dict, pattern: Optional[str], force: bool) -> None:
     if spec['remote_root'] is None:
         sys.exit('`push` not supported for this device (paste-into-browser target)')
-    if not spec['volume'].exists():
-        sys.exit(f'device not mounted at {spec["volume"]}')
-    spec['remote_root'].mkdir(parents=True, exist_ok=True)
+    _ensure_remote_root(spec)
 
     files = find_local(spec['suffix'], pattern)
     if not files:

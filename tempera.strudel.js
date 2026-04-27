@@ -349,6 +349,30 @@ async function exportViaServer(spec) {
   }
 }
 
+// Open strudel.cc in a new tab and put the rendered template on the
+// clipboard so the user can switch over and Cmd-V immediately. The
+// new tab is opened *synchronously* before any awaits — pop-up
+// blockers reject window.open once the user-gesture context has
+// elapsed past the first await.
+async function openInStrudel(spec) {
+  const win = window.open('https://strudel.cc/', '_blank');
+  try {
+    const { blob } = await postExport('/api/export/text', {
+      target: spec.target,
+      payload: capturesPayload,
+    });
+    const text = await blob.text();
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    if (win) win.close();
+    console.error('[tempera] strudel export failed:', e);
+    alert(
+      'Strudel export failed: ' + e.message +
+      '\n\nIs the strudelbreaks server running?\n  ./scripts/run.sh',
+    );
+  }
+}
+
 let exportMenu = null;
 const exportBtn = SB.ui.createButton('export ▾', function (e) {
   // stopPropagation so the document-level outside-click listener
@@ -362,7 +386,9 @@ const exportBtn = SB.ui.createButton('export ▾', function (e) {
       label: spec.label,
       onSelect: spec.kind === 'local'
         ? () => capturesStore.exportAsFile('tempera-captures-' + gistId)
-        : () => exportViaServer(spec),
+        : spec.target === 'strudel'
+          ? () => openInStrudel(spec)
+          : () => exportViaServer(spec),
     })),
     onClose: () => { exportMenu = null; },
   });
