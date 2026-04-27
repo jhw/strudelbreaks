@@ -67,30 +67,62 @@ event/response shape, which is plain dicts.
 
 A few constraints don't carry over cleanly:
 
-### 1. Two raw Lambda handlers, one per route
+### 1. One raw Lambda per export target
 
-The current FastAPI routers become two `event, context` handlers,
-shaped exactly like outrights-mip's `simulate/handler.py`:
+Four handlers, four routes, four Lambda functions — proper
+single-responsibility Lambda layout. Each export target becomes its
+own deployable unit:
 
 ```
-app/api/text_export/handler.py    → POST /api/export/text
-app/api/binary_export/handler.py  → POST /api/export/binary
+app/api/strudel/handler.py    → POST /api/export/strudel
+app/api/ot_basic/handler.py   → POST /api/export/ot-basic
+app/api/ot_doom/handler.py    → POST /api/export/ot-doom
+app/api/torso_s4/handler.py   → POST /api/export/torso-s4
 ```
 
-Each handler:
+Per-handler shape (mirrors outrights-mip's `simulate/handler.py`):
 
-1. Auth check (`_check_auth(event)` — same shape as outrights-mip).
+1. Auth check (`check_auth(event)` — shared helper in `app/api/_auth.py`).
 2. JSON-parse `event["body"]`.
-3. Manually validate the body fields (`target`, `payload`, optional
-   `name` / `seed` / `probability` / `source` / `split_stems`). No
-   Pydantic — outrights-mip's `_validate_*` pattern (one validator
-   per field group, raises `ValueError`) is the model.
+3. Validate only the fields this target accepts. No Pydantic —
+   outrights-mip's `_validate_*` pattern (one validator per field
+   group, raises `ValueError`) is the model. The `target` field
+   goes away from the body entirely; the route encodes the target.
+   Per-target body shape:
+   - **strudel**:   `payload`, optional `name`, `seed`
+   - **ot-basic**:  `payload`, optional `name`, `seed`, `probability`, `split_stems`
+   - **ot-doom**:   `payload`, optional `name`, `seed`, `split_stems`
+   - **torso-s4**:  `payload`, optional `name`, `seed`, `source`
 4. Call into `app.exporters.export_*` (unchanged).
-5. Return `{statusCode, headers, body}`. For binary responses,
-   base64-encode the bytes and set `isBase64Encoded=True` so API
-   Gateway hands raw bytes back to the browser.
+5. Return `{statusCode, headers, body}`. For the three binary
+   handlers: base64-encode the bytes and set `isBase64Encoded=True`
+   so API Gateway hands raw bytes back to the browser. The strudel
+   handler returns text directly.
 
-`app/main.py`, `app/config.py`, and `app/routes/` are all deleted.
+Why one Lambda per target (not one fat dispatcher):
+
+- **Independent rollback.** A bug in the ot-doom renderer doesn't
+  force a redeploy of strudel. `pulumi config set ot_doom_image_uri
+  <prev-digest> && pulumi up` rolls back just that function.
+- **Independent memory + timeout.** `strudel` is a text template,
+  ~30 s / 256 MB is plenty. The three audio renderers want
+  ~120 s / 3 GB. Provisioning each separately = lower cost and
+  fewer "why did the strudel export use 3 GB?" surprises.
+- **Independent CloudWatch log groups.** One log stream per
+  handler, easier to tail when debugging a specific target.
+- **Independent IAM.** All four happen to share the same
+  S3-read role today; that can stay one role attached to four
+  functions. If any one target ever needs different perms (a
+  separate bucket, KMS key, etc.), the per-function role
+  swap-out is a one-line change.
+
+All four handlers ship from the same container image — the image
+is a self-contained bundle of `app/`, and each Lambda's
+`image_config.commands` picks the right entry point
+(`app.api.strudel.handler.handler`, etc.). One ECR repo, one build,
+four CMD overrides at deploy time.
+
+`app/main.py`, `app/config.py`, and `app/routes/` are deleted.
 `app/exporters.py` and the entirety of `app/export/` stay as-is —
 that's the actual render code, and it has zero FastAPI coupling.
 
@@ -250,12 +282,14 @@ infra/pipeline/
 infra/app/
   Pulumi.yaml
   Pulumi.strudelbreaks.yaml
-  __main__.py              Two Lambda functions (text + binary),
-                           one HTTP API, two routes, CORS, IAM permissions
+  __main__.py              Four Lambda functions (one per export target),
+                           one HTTP API, four routes, CORS, IAM permissions
 
 docker/
   Dockerfile               public.ecr.aws/lambda/python:3.12 base
                            + beatwav (numpy/scipy) + octapy + pydub + app/
+                           One image, four CMD entry points (set per-Lambda
+                           via image_config.commands).
   buildspec.yml            ECR login + cache + build + push
 
 scripts/stack/
@@ -267,13 +301,24 @@ config/
 
 app/                       (refactored)
   api/
-    _auth.py               check_auth(event) helper
-    text_export/handler.py POST /api/export/text  (was app/routes/text_export.py)
-    binary_export/handler.py POST /api/export/binary (was app/routes/binary_export.py)
+    _auth.py               check_auth(event) helper, shared by all 4 handlers
+    strudel/handler.py     POST /api/export/strudel
+    ot_basic/handler.py    POST /api/export/ot-basic
+    ot_doom/handler.py     POST /api/export/ot-doom
+    torso_s4/handler.py    POST /api/export/torso-s4
   exporters.py             unchanged — render coordinator
   export/                  unchanged — per-target render code
                            (just sample_source.py reworked for boto3 + env paths)
 ```
+
+Per-Lambda sizing (rough first cut, tune from CloudWatch):
+
+| Handler | Memory | Timeout | Notes |
+|---|---|---|---|
+| `strudel`   | 256 MB  | 30 s  | text template, no audio |
+| `ot-basic`  | 3 GB    | 120 s | beatwav per-stem render |
+| `ot-doom`   | 3 GB    | 120 s | beatwav per-stem + chain build |
+| `torso-s4`  | 3 GB    | 120 s | beatwav mixed render at 96 kHz |
 
 Files removed: `app/main.py`, `app/config.py`, `app/routes/`,
 `scripts/run.sh`. requirements.txt loses fastapi / uvicorn /
@@ -305,9 +350,15 @@ local invocations don't need a token.
 - `SERVER_URL` becomes the deployed API Gateway URL (config knob in
   the script header). Optional fallback to `127.0.0.1:8000` on a
   toggle so the user can hit the local server when offline.
-- Every `postExport` call gains an `Authorization: Basic ...` header.
-  Credentials read from `localStorage` (prompt on first export,
-  "remember me" via the existing `createPersistedStore`).
+- The two endpoint paths (`/api/export/text`, `/api/export/binary`)
+  collapse into four (`/api/export/{strudel,ot-basic,ot-doom,torso-s4}`).
+  `EXPORT_TARGETS` already carries the per-target label/spec; the
+  endpoint URL just becomes `${SERVER_URL}/api/export/${spec.target}`.
+- `target` field comes out of the request body (it's in the path
+  now).
+- Every `postExport` call gains an `Authorization: Basic ...`
+  header. Credentials read from `localStorage` (prompt on first
+  export, "remember me" via the existing `createPersistedStore`).
 - New `notify(...)` already in place handles the 401 / 403 / 5xx
   responses without blocking playback.
 
@@ -334,17 +385,13 @@ one stage at first.
    from a public URL. localStorage prompt is friendliest, but means
    one extra UI primitive. Inline constant is fastest to ship and
    acceptable for a single-developer workflow.
-3. **One Lambda or two?** The plan above has one Lambda per route
-   (text + binary) following outrights-mip's per-route pattern. The
-   alternative is one fat Lambda that internally dispatches on path.
-   Per-route is cleaner separation; one fat Lambda halves cold-start
-   cost since both routes share warm capacity. For a low-traffic
-   dev tool with one user, **probably go with one fat Lambda** with
-   a tiny path-router at the top of the handler — saves a duplicate
-   warm instance.
-4. **Provisioned concurrency or accept cold starts?** Cost ≈ $5/mo
-   for 1 warm instance vs. 10–30 s on the first export of a session.
-   Default: accept cold start; revisit if it bites.
+3. **Provisioned concurrency or accept cold starts?** Cost ≈ $5/mo
+   per warm instance vs. 10–30 s on the first export of a session
+   *per Lambda*. With four Lambdas the cold-start cost is per
+   target — switching from a strudel export to an ot-doom export
+   pays the cold-start tax twice. Default: accept cold start;
+   revisit if a single target bites enough to warrant warming just
+   that one.
 5. **Domain / TLS.** API Gateway gives a generated `*.execute-api`
    URL out of the box. Custom domain (`api.strudelbreaks.dev` or
    similar) needs Route 53 + ACM. Skip for v1 unless there's a
@@ -372,11 +419,11 @@ one stage at first.
 
 1. Refactor `sample_source.py` to take bucket + tmp paths from env;
    replace `aws s3 sync` with boto3.
-2. Carve `app/api/text_export/handler.py` and
-   `app/api/binary_export/handler.py` out of the existing route
-   files: same body validation logic (manual instead of Pydantic),
-   same call into `app.exporters`. Common `app/api/_auth.py` for
-   the HTTP Basic check.
+2. Carve four handlers out of the existing route files —
+   `app/api/{strudel,ot_basic,ot_doom,torso_s4}/handler.py`. Each
+   handler validates only the fields its target accepts (no
+   `target` field in the body any more — it's in the route).
+   Common `app/api/_auth.py` for the HTTP Basic check.
 3. Delete `app/main.py`, `app/config.py`, `app/routes/`,
    `scripts/run.sh`. Drop fastapi / uvicorn / pydantic from
    requirements.txt.
@@ -386,7 +433,10 @@ one stage at first.
 6. Write `infra/pipeline/__main__.py` + modules (mostly mirrored
    from outrights-mip, with our IAM grants + bucket name
    substituted).
-7. Write `infra/app/__main__.py` (Lambda + HTTP API + permissions).
+7. Write `infra/app/__main__.py` — one HTTP API, four Lambda
+   functions (each with its own memory/timeout/CMD entrypoint),
+   four routes, four `lambda:InvokeFunction` permissions. Shared
+   IAM role across all four (S3 read on the configured bucket).
 8. Write `scripts/stack/deploy.py` (port from outrights-mip; same
    hash-or-skip logic).
 9. Smoke test deployed dev.
