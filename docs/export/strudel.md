@@ -9,19 +9,18 @@ contract as `tempera.strudel.js` at the repo root, just with the
 breaks/patterns from the export baked in as literal mini-notation
 strings.
 
-Invocation: tempera's `export ▾` menu → `strudel`. The browser opens
-[strudel.cc](https://strudel.cc/) in a new tab and copies the
-rendered template to your clipboard — switch to the new tab and paste
-(Cmd-V / Ctrl-V) into the editor. Under the hood the page POSTs the
+Invocation: tempera's `export ▾` menu → `strudel`. Tempera POSTs the
 captures payload to `POST /api/export/text` (`target='strudel'`); the
 server calls `app.export.strudel.render.render()` and streams the
-rendered text back; the page calls `navigator.clipboard.writeText`.
+rendered template back; the browser opens
+`https://strudel.cc/#<base64-of-utf8>` in a new tab so strudel.cc
+loads the export directly rather than restoring whatever its own
+localStorage had cached. The text is also copied to the clipboard
+as a manual fallback.
 
-The new tab is opened *synchronously* before the fetch so the
-browser's pop-up blocker treats it as a direct response to the user
-click. Both the tab-open and the clipboard-write rely on the export
-button being a real user gesture; programmatic invocation via the
-console will be blocked.
+The window.open call relies on the export button being a real user
+gesture; programmatic invocation via the console will be blocked by
+the pop-up blocker.
 
 There is **no `--source` flag** here. The generated template is
 WAV-only by construction — `await samples(gistUrl)` reads the gist's

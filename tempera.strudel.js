@@ -349,19 +349,14 @@ async function exportViaServer(spec) {
   }
 }
 
-// Open strudel.cc in a new tab and put the rendered template on the
-// clipboard so the user can switch over and Cmd-V immediately.
-//
-// Order matters: navigator.clipboard.writeText requires the calling
-// document to be focused, and window.open('https://strudel.cc/',
-// '_blank') steals focus to the new tab. So we copy first, then open
-// — both are within the click's transient-activation window
-// (~5s in Chrome / Firefox) so the popup blocker still treats
-// window.open as user-initiated.
-//
-// Clipboard fall-back: if writeText is rejected anyway (focus
-// timing, no permission, insecure context), we save the rendered
-// .strudel.js to ~/Downloads and the user can paste from there.
+// Open strudel.cc in a new tab with the rendered template embedded
+// in the URL hash, so the new tab loads our export rather than
+// whatever strudel.cc's localStorage last cached. The hash form is
+// `https://strudel.cc/#<base64-of-utf8>` — strudel.cc decodes the
+// hash on first paint and drops the program straight into the
+// editor. We also copy the text to the clipboard as a manual
+// fallback in case the URL form is too large or strudel.cc's hash
+// reader changes.
 async function openInStrudel(spec) {
   let filename, blob, text;
   try {
@@ -379,19 +374,25 @@ async function openInStrudel(spec) {
     return;
   }
 
-  let copied = false;
+  // Best-effort clipboard fallback. Browsers reject writeText if the
+  // page isn't focused — strudel.cc steals focus on window.open — so
+  // we copy first, then open the tab.
   try {
     await navigator.clipboard.writeText(text);
-    copied = true;
   } catch (e) {
-    console.warn('[tempera] clipboard write blocked; falling back to download:', e);
-    downloadAs(blob, filename);
+    console.warn('[tempera] clipboard write blocked:', e);
   }
-  window.open('https://strudel.cc/', '_blank');
-  if (!copied) {
-    alert('Clipboard write was blocked — downloaded ' + filename
-      + ' to ~/Downloads. Open it and paste into strudel.cc.');
+
+  // btoa only handles Latin-1; encode UTF-8 first. Chunked
+  // String.fromCharCode so very large exports don't blow the call
+  // stack on the spread.
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
   }
+  const url = 'https://strudel.cc/#' + btoa(bin);
+  window.open(url, '_blank');
 }
 
 let exportMenu = null;
