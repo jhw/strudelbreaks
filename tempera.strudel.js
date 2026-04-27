@@ -58,6 +58,28 @@ const SB = await new Promise((resolve, reject) => {
 
 SB.ui.resetUI();
 
+// Non-blocking status display, in place of window.alert. The Web
+// Audio context pauses while a modal alert / confirm is open, so
+// every user-visible error needs to flow through this transient
+// corner panel + console instead. Auto-hides after 5s; the latest
+// message replaces any prior one.
+const notifyPanel = SB.ui.createCornerPanel({
+  corner: 'bottom-right', id: 'notify',
+  style: 'min-width:240px;max-width:480px',
+});
+notifyPanel.element.style.display = 'none';
+let notifyTimer = null;
+function notify(msg) {
+  console.warn('[tempera]', msg);
+  notifyPanel.setText(msg);
+  notifyPanel.element.style.display = '';
+  if (notifyTimer) clearTimeout(notifyTimer);
+  notifyTimer = setTimeout(() => {
+    notifyPanel.element.style.display = 'none';
+    notifyTimer = null;
+  }, 5000);
+}
+
 const PATTERN_MODES = ['forward', 'reverse', 'ping_pong', 'ping_pong_repeat'];
 if (PATTERN_MODES.length !== N_PATTERN_MODES) throw new Error('N_PATTERN_MODES must match PATTERN_MODES.length');
 
@@ -342,10 +364,7 @@ async function exportViaServer(spec) {
     downloadAs(blob, filename);
   } catch (e) {
     console.error('[tempera] export failed:', e);
-    alert(
-      'Export failed: ' + e.message +
-      '\n\nIs the strudelbreaks server running?\n  ./scripts/run.sh',
-    );
+    notify('Export failed: ' + e.message + ' (server up? ./scripts/run.sh)');
   }
 }
 
@@ -367,10 +386,7 @@ async function openInStrudel(spec) {
     text = await blob.text();
   } catch (e) {
     console.error('[tempera] strudel export failed:', e);
-    alert(
-      'Strudel export failed: ' + e.message +
-      '\n\nIs the strudelbreaks server running?\n  ./scripts/run.sh',
-    );
+    notify('Strudel export failed: ' + e.message + ' (server up? ./scripts/run.sh)');
     return;
   }
 
@@ -415,27 +431,22 @@ const exportBtn = SB.ui.createButton('export ▾', function (e) {
     onClose: () => { exportMenu = null; },
   });
 });
-// Export-config panel: per-target switches read by the export action
-// menu. Stays visible above the captures toolbar so the toggle is in
-// the same visual cluster as the export button.
-const exportConfigPanel = SB.ui.createCornerPanel({
-  corner: 'top-right', id: 'export-config',
-  stack: 'log-display',
-  style: 'min-width:340px;max-width:520px',
-});
-const splitStemsToggle = SB.ui.createToggleRow({
+// Captures toolbar: new-row + export buttons + split-stems toggle.
+// All three are pre-built elements appended to a single createFormBar
+// so the boolean switch sits inline with the action buttons rather
+// than in its own panel.
+const splitStemsToggle = SB.ui.createToggleSwitch({
   label: 'split stems',
   initial: exportConfig.splitStems,
   onChange: (v) => { exportConfig.splitStems = v; },
 });
-exportConfigPanel.element.appendChild(splitStemsToggle.element);
-
-const capturesToolbar = SB.ui.createButtonBar({
+const capturesToolbar = SB.ui.createFormBar({
   corner: 'top-right', id: 'captures-toolbar',
-  stack: 'export-config',
-  buttons: [
+  stack: 'log-display',
+  items: [
     SB.ui.createButton('new row', newRow),
     exportBtn,
+    splitStemsToggle.element,
   ],
 });
 

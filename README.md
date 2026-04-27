@@ -49,7 +49,7 @@ window.StrudelBreaks = {
   mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
   util:  { meanIndex, thinByUniforms },
   hex:   { hex2, hexPad, arrayHex },
-  ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createSliderRow, createSliderPanel, createToggleRow, createActionMenu, resetUI },
+  ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createFormBar, createSliderRow, createSliderPanel, createToggleSwitch, createActionMenu, resetUI },
   store: { createPersistedStore, downloadBlob },
 };
 ```
@@ -129,13 +129,18 @@ at the edge (for Strudel's `mini()` / `fmap(mini).innerJoin()` dance).
 - `createDeleteIcon(onClick, { style? })` → red-hover `x` preset over
   `createIconButton` for destructive actions. No confirmation is
   wired — callers handle that at the domain layer.
+- `createFormBar({ corner, id, style?, stack?, items, itemMinWidth? })` →
+  `{ element }`. Horizontal corner-anchored bar that holds any DOM
+  elements — buttons, toggle switches, icon buttons, even spans of
+  text. `items` is the array of pre-built elements appended in
+  order; `itemMinWidth` (e.g. `'90px'`) applies a uniform min-width
+  to every item so the bar looks visually grid-like. Tighter
+  default padding than a general panel. Lets a template split its
+  toolbar into multiple independently-stacked bars and mix control
+  types in one bar.
 - `createButtonBar({ corner, id, style?, stack?, buttons })` →
-  `{ element }`. Thin convenience over `createCornerPanel` with a
-  flex row and tighter bar-style padding. `buttons` is an array of
-  pre-built elements (typically from `createButton` /
-  `createIconButton`) appended in order. Lets a template split its
-  toolbar into multiple independently-stacked bars rather than
-  cramming every control into a single panel.
+  back-compat alias for `createFormBar` accepting the old `buttons`
+  parameter name.
 - `createSliderRow({ label, min, max, initial?, step?, onChange, format?, width? })` →
   `{ element, setValue, getValue }`. Flex row: label + readout +
   native `<input type=range>`. `format(v)` renders the readout
@@ -152,12 +157,12 @@ at the edge (for Strudel's `mini()` / `fmap(mini).innerJoin()` dance).
   `createCornerPanel` — useful for stacking the slider panel above or
   below another corner-anchored block. Thin convenience over
   `createCornerPanel` + repeated `createSliderRow`.
-- `createToggleRow({ label, initial?, onChange, onLabel?, offLabel? })` →
-  `{ element, setValue, getValue }`. Two-state slider row over
-  `createSliderRow` (min=0, max=1, step=1) with an `on`/`off` readout
-  and a boolean `onChange`. For binary export-config switches that
-  should match the visual style of the other slider rows rather than
-  a checkbox.
+- `createToggleSwitch({ label?, initial?, onChange })` →
+  `{ element, setValue, getValue }`. Compact CSS on/off switch — a
+  pill track with a sliding knob, optionally preceded by an inline
+  text label. Designed to drop into a `createFormBar` next to
+  buttons; when the value is genuinely binary, prefer this over
+  `createSliderRow`.
 - `createActionMenu({ anchor, items, onClose? })` →
   `{ element, close }`. Pop-up dropdown anchored under `anchor` (a
   trigger element); `items` is an array of `{ label, onSelect }`,

@@ -317,18 +317,32 @@
     return createIconButton('x', onClick, { hoverBg: '#a33', hoverColor: '#fff', style });
   }
 
-  // Thin convenience over createCornerPanel: a flex row of buttons as
-  // its own corner-anchored widget, so a template can split toolbars
-  // into multiple independently-positioned bars. `buttons` is an array
-  // of pre-built elements (typically from createButton / createIconButton)
-  // appended in order. Tighter default padding than a general panel so
-  // the bar looks like a bar, not a panel.
-  function createButtonBar({ corner, id, style = '', stack, buttons }) {
+  // Horizontal corner-anchored bar that holds any DOM elements —
+  // buttons, toggle switches, icon buttons, even spans of text. A
+  // template can split a toolbar into multiple independently
+  // positioned bars and mix control types within one bar. `items`
+  // is the array of pre-built elements appended in order;
+  // `itemMinWidth` (e.g. '90px') applies a uniform min-width to
+  // every item so the bar looks visually grid-like.
+  //
+  // Tighter default padding than a general panel so the bar looks
+  // like a bar, not a panel.
+  function createFormBar({ corner, id, style = '', stack, items, itemMinWidth }) {
     const barStyle = 'display:flex;gap:4px;align-items:center;padding:6px 10px'
       + (style ? ';' + style : '');
     const panel = createCornerPanel({ corner, id, style: barStyle, stack });
-    for (const btn of buttons) panel.element.appendChild(btn);
+    for (const it of items) {
+      if (itemMinWidth) it.style.minWidth = itemMinWidth;
+      panel.element.appendChild(it);
+    }
     return { element: panel.element };
+  }
+
+  // Back-compat alias: old `createButtonBar({ buttons })` signature
+  // forwards to createFormBar's `items`. Existing consumers keep
+  // working; new code should use createFormBar.
+  function createButtonBar({ corner, id, style, stack, buttons }) {
+    return createFormBar({ corner, id, style, stack, items: buttons });
   }
 
   // Integer-range DOM slider row: label + readout + native
@@ -416,28 +430,56 @@
     };
   }
 
-  // Two-state toggle styled as a slider row. Thin convenience over
-  // createSliderRow with min=0, max=1, step=1 and an on/off readout.
-  // `initial` is a boolean; `onChange(boolean)` fires on flip;
-  // `setValue(boolean)` snaps without firing onChange.
-  // Useful for binary export-config switches the user wants to look
-  // and feel like the other slider controls (rather than a checkbox).
-  function createToggleRow({
-    label, initial = false, onChange,
-    onLabel = 'on', offLabel = 'off',
-  }) {
-    const fmt = (v) => (v ? onLabel : offLabel);
-    const row = createSliderRow({
-      label, min: 0, max: 1, step: 1,
-      initial: initial ? 1 : 0,
-      onChange: onChange ? (v) => onChange(!!v) : undefined,
-      format: fmt,
-      width: Math.max(onLabel.length, offLabel.length),
+  // CSS on/off toggle — a 28x14 pill track with a 12px knob that
+  // slides between off (left, dim) and on (right, green). Optional
+  // inline label sits to the left of the track. `onChange(bool)`
+  // fires on click; `setValue(bool)` flips without firing onChange.
+  //
+  // Designed to sit inline with createButton / createFormBar items
+  // — small, fixed height, no readout digits or sliders. Use this
+  // (not createSliderRow) when the value is genuinely binary.
+  function createToggleSwitch({ label, initial = false, onChange } = {}) {
+    const wrap = document.createElement('span');
+    wrap.dataset.strudelbreaks = '1';
+    wrap.style.cssText = 'display:inline-flex;align-items:center;gap:6px;'
+      + 'cursor:pointer;user-select:none;-webkit-user-select:none;font:inherit';
+
+    if (label) {
+      const labEl = document.createElement('span');
+      labEl.textContent = label;
+      wrap.appendChild(labEl);
+    }
+
+    const track = document.createElement('span');
+    track.style.cssText = 'position:relative;display:inline-block;'
+      + 'width:28px;height:14px;border-radius:7px;flex:0 0 auto;'
+      + 'transition:background 0.15s';
+
+    const knob = document.createElement('span');
+    knob.style.cssText = 'position:absolute;top:1px;'
+      + 'width:12px;height:12px;border-radius:50%;'
+      + 'transition:left 0.15s, background 0.15s';
+    track.appendChild(knob);
+    wrap.appendChild(track);
+
+    let value = !!initial;
+    function paint() {
+      track.style.background = value ? '#0a0' : '#444';
+      knob.style.background = value ? '#000' : '#bbb';
+      knob.style.left = value ? '15px' : '1px';
+    }
+    paint();
+
+    wrap.addEventListener('click', () => {
+      value = !value;
+      paint();
+      if (onChange) onChange(value);
     });
+
     return {
-      element: row.element,
-      setValue(v) { row.setValue(v ? 1 : 0); },
-      getValue() { return !!row.getValue(); },
+      element: wrap,
+      setValue(v) { value = !!v; paint(); },
+      getValue() { return value; },
     };
   }
 
@@ -588,7 +630,7 @@
     mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
     util:  { meanIndex, thinByUniforms },
     hex:   { hex2, hexPad, arrayHex },
-    ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createSliderRow, createSliderPanel, createToggleRow, createActionMenu, resetUI },
+    ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createFormBar, createSliderRow, createSliderPanel, createToggleSwitch, createActionMenu, resetUI },
     store: { createPersistedStore, downloadBlob },
   };
 });
