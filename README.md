@@ -254,26 +254,39 @@ Response is the artifact bytes/text; the filename lives in
 per request so nothing accumulates locally — the browser's `~/Downloads/`
 is the only persistent output location.
 
-### Device tooling (`tools/`)
+### Device tooling (`tools/sync.py`)
 
-Each target's tooling lives at `tools/<device>/`. Push iterates
-`~/Downloads/<adj>-<noun>.<ext>` (strict adj-noun guard so unrelated
-files in Downloads can't be picked up), reads the project name from
-each zip, skips ones already on the device, and asks per-project
-whether to extract. `clean_local.py` is the symmetric local cleanup.
+A single `sync.py` handles push/clean/status for all devices.
+Auto-detects the connected device by scanning `/Volumes/`; pass
+`--device` (or the aliases `ot` / `s4`) when ambiguous. The
+`<adj>-<noun>` regex guard keeps custom-named exports (anything you
+generated with `--name MYPROJECT`) out of auto-batch verbs.
 
 ```
-tools/octatrack/push.py          # ~/Downloads/*.ot.zip       → /Volumes/OCTATRACK/strudelbeats/
-tools/octatrack/clean_local.py   # ~/Downloads/*.ot.zip       (remove)
-tools/octatrack/clean_remote.py  # /Volumes/OCTATRACK/strudelbeats/<project>/  (remove)
-tools/octatrack/clean_stubs.py   # /Volumes/OCTATRACK/strudelbeats/<dangling>/ (remove)
-
-tools/torso-s4/push.py           # ~/Downloads/*.s4.zip       → /Volumes/S4/samples/strudelbeats/
-tools/torso-s4/clean_local.py    # ~/Downloads/*.s4.zip       (remove)
-tools/torso-s4/clean_remote.py   # /Volumes/S4/samples/strudelbeats/<project>/ (remove)
-
-tools/strudel/clean_local.py     # ~/Downloads/*.strudel.js   (remove; no push — paste into strudel.cc)
+tools/sync.py push                     # extract local zips onto the device
+tools/sync.py clean local              # remove ~/Downloads/<adj>-<noun>.<suffix>
+tools/sync.py clean remote             # remove device-side projects
+tools/sync.py clean stubs              # OT-only: remove dangling non-project dirs
+tools/sync.py status                   # compare local vs remote for the detected device
 ```
+
+Common args on every verb: `pattern` (substring filter on project
+name), `-f / --force` (no per-item prompt), `--device` (override
+auto-detect). Examples:
+
+```
+tools/sync.py push -f                  # auto-detect, force-push everything
+tools/sync.py push foo --device s4     # filter by 'foo', explicit S-4
+tools/sync.py status --device strudel  # local-only summary (no remote)
+```
+
+Device map:
+
+| Device | Volume | Remote root | Suffix |
+|---|---|---|---|
+| `octatrack` (alias `ot`) | `/Volumes/OCTATRACK` | `strudelbeats/` (gated by `project.work`; pairs with `AUDIO/projects/<NAME>/`) | `.ot.zip` |
+| `torso-s4` (alias `s4`)  | `/Volumes/S4`        | `samples/strudelbeats/` | `.s4.zip` |
+| `strudel`                 | — (paste into browser) | — | `.strudel.js` |
 
 ### Source rendering
 
