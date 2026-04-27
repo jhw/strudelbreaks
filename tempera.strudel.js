@@ -350,26 +350,47 @@ async function exportViaServer(spec) {
 }
 
 // Open strudel.cc in a new tab and put the rendered template on the
-// clipboard so the user can switch over and Cmd-V immediately. The
-// new tab is opened *synchronously* before any awaits — pop-up
-// blockers reject window.open once the user-gesture context has
-// elapsed past the first await.
+// clipboard so the user can switch over and Cmd-V immediately.
+//
+// Order matters: navigator.clipboard.writeText requires the calling
+// document to be focused, and window.open('https://strudel.cc/',
+// '_blank') steals focus to the new tab. So we copy first, then open
+// — both are within the click's transient-activation window
+// (~5s in Chrome / Firefox) so the popup blocker still treats
+// window.open as user-initiated.
+//
+// Clipboard fall-back: if writeText is rejected anyway (focus
+// timing, no permission, insecure context), we save the rendered
+// .strudel.js to ~/Downloads and the user can paste from there.
 async function openInStrudel(spec) {
-  const win = window.open('https://strudel.cc/', '_blank');
+  let filename, blob, text;
   try {
-    const { blob } = await postExport('/api/export/text', {
+    ({ filename, blob } = await postExport('/api/export/text', {
       target: spec.target,
       payload: capturesPayload,
-    });
-    const text = await blob.text();
-    await navigator.clipboard.writeText(text);
+    }));
+    text = await blob.text();
   } catch (e) {
-    if (win) win.close();
     console.error('[tempera] strudel export failed:', e);
     alert(
       'Strudel export failed: ' + e.message +
       '\n\nIs the strudelbreaks server running?\n  ./scripts/run.sh',
     );
+    return;
+  }
+
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    copied = true;
+  } catch (e) {
+    console.warn('[tempera] clipboard write blocked; falling back to download:', e);
+    downloadAs(blob, filename);
+  }
+  window.open('https://strudel.cc/', '_blank');
+  if (!copied) {
+    alert('Clipboard write was blocked — downloaded ' + filename
+      + ' to ~/Downloads. Open it and paste into strudel.cc.');
   }
 }
 
