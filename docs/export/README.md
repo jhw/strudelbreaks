@@ -2,8 +2,9 @@
 
 Per-target documentation for `app/export/`. The captures payload
 (persisted by tempera in `localStorage`) is rendered into one of
-several formats by the FastAPI server in `app/`; each target's render
-module here is imported and called by `app/exporters.py`.
+several formats by the deployed Lambda handlers in `app/api/`; each
+target's render module here is imported and called by
+`app/exporters.py`.
 
 | Doc | Target | Filename | Source mode |
 |---|---|---|---|
@@ -31,7 +32,9 @@ module here is imported and called by `app/exporters.py`.
     sibling JSON. Mixed-stem only — gist WAVs can't be split into
     per-track stems after the fact.
 
-  Cache layout under `tmp/samples/<gistId>/`:
+  Cache layout under `<tmp>/samples/<gistId>/` (where `<tmp>` is
+  `<repo>/tmp/` locally and `/tmp/` on Lambda — set via
+  `STRUDELBREAKS_TMP`):
 
   ```
   <name>.wav                                       gist-fetched WAVs
@@ -48,9 +51,13 @@ module here is imported and called by `app/exporters.py`.
   The rendered cache is keyed on (sample_rate, bpm) so the OT
   (44.1 kHz) and S-4 (96 kHz) caches coexist without collision.
 
-  JSON mode mirrors `s3://wol-samplebank/samples/` to `tmp/oneshots/`
-  via `aws s3 sync` on first use — that's where the one-shot drum
-  samples beatwav references live.
+  JSON mode mirrors the configured one-shot S3 bucket
+  (`ONESHOT_S3_URI` env var; defaults to `s3://wol-samplebank/samples/`
+  for local dev) to `<tmp>/oneshots/` via boto3 on first use — that's
+  where the one-shot drum samples beatwav references live. On Lambda
+  the bucket URI is supplied as a Pulumi config value and the
+  function's IAM role grants `s3:GetObject` on it; no per-laptop AWS
+  credential refresh.
 - **`app/export/common/devices.py`** — per-device sample-rate
   constants (`OT_SAMPLE_RATE`, `S4_SAMPLE_RATE`) shared across
   targets so the two Octatrack targets can't drift apart.

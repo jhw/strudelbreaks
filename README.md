@@ -208,8 +208,9 @@ no version pinning.
 
 Tempera (`app/launch/tempera.strudel.js`) persists captures to
 `localStorage` and exposes a per-format export menu. Selecting a
-format POSTs the in-memory payload to the local FastAPI server in
-`app/`, which renders the artifact via the modules in `app/export/`
+format POSTs the in-memory payload to the deployed Lambda export
+server (one Lambda per export target, all behind a single API Gateway
+HTTP API), which renders the artifact via the modules in `app/export/`
 and streams it back as a download. The browser saves it to
 `~/Downloads/`; per-device push scripts copy from there onto the
 device.
@@ -228,37 +229,61 @@ which renderer produced a given file.
 
 ### Server
 
+The export server is a set of AWS Lambdas (one per target) behind an
+API Gateway HTTP API, deployed via Pulumi. Two stacks:
+
+```
+infra/pipeline/   ECR + CodeBuild + S3 artifacts + IAM (lambda role)
+infra/app/        Four Lambda functions + HTTP API + routes + CORS
+```
+
+`scripts/stack/deploy.py` orchestrates the two-step deploy:
+
+1. `pulumi up` on `infra/pipeline` (idempotent — almost always no-op).
+2. SHA-256 the source + Dockerfile; if unchanged, reuse the last
+   build's image digest. Otherwise upload `source.zip` to the
+   artifacts bucket, kick off CodeBuild, capture the resulting
+   image digest, persist a marker so the next run can skip.
+3. `pulumi up` on `infra/app` with the new image URI as config.
+
 ```bash
-# 1. Install deps in a venv
+# 1. Install deps locally (for tests + the deploy orchestrator)
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
+pip install pulumi pulumi-aws
 
-# 2. Start the server (localhost:8000)
-./scripts/run.sh
+# 2. Configure the stack — bucket + auth token
+pulumi --cwd infra/pipeline stack init dev
+pulumi --cwd infra/pipeline config set oneshot_s3_uri s3://wol-samplebank/samples/
+pulumi --cwd infra/app stack init dev
+
+# 3. Deploy
+source config/setenv.sh   # exports AWS_REGION, AUTH_TOKEN
+python scripts/stack/deploy.py --stage dev
 ```
 
-The export menu in tempera POSTs to `http://127.0.0.1:8000`. Chrome
-treats `http://localhost` / `127.0.0.1` as a secure context exempt
-from mixed-content blocking, so the HTTPS strudel.cc page can fetch
-the local server with no flags. CORS is opened wide; nothing
-authenticated lives behind the loopback address.
-
-Endpoints:
+Endpoints (one Lambda per route, all on the same image — different
+`image_config.commands` per Lambda):
 
 ```
-POST /api/export/text    { target: 'strudel',
-                           payload, name?, seed? }
-POST /api/export/binary  { target: 'ot-basic'|'ot-doom'|'torso-s4',
-                           payload, name?, seed?,
-                           probability? (ot-basic),
-                           source? (torso-s4: 'json'|'wav'),
-                           split_stems? (ot-basic / ot-doom: bool, default true) }
+POST /api/export/strudel   { payload, name?, seed? }
+POST /api/export/ot-basic  { payload, name?, seed?,
+                             probability?, split_stems? }
+POST /api/export/ot-doom   { payload, name?, seed?, split_stems? }
+POST /api/export/torso-s4  { payload, name?, seed?, source? }
 ```
 
-Response is the artifact bytes/text; the filename lives in
-`Content-Disposition`. The server uses a fresh `tempfile.TemporaryDirectory()`
-per request so nothing accumulates locally — the browser's `~/Downloads/`
-is the only persistent output location.
+Auth: HTTP Basic via the `AUTH_TOKEN` env var
+(`username:password`). Tempera prompts on first export and stores
+the credentials in `localStorage`; a 401 wipes them so a typo
+re-prompts cleanly. Response is the artifact bytes (binary targets
+base64-encoded by API Gateway) or text (strudel target); the
+filename lives in `Content-Disposition`.
+
+Response size cap: 6 MB (Lambda sync response ceiling). Larger
+exports return `413` with a hint to use fewer rows; the eventual
+fix is a presigned-URL response path, deferred until real exports
+hit the limit.
 
 ### Device tooling (`tools/sync.py`)
 
@@ -315,13 +340,14 @@ independent shaping, sharing CHORUS + DELAY on T8. Set the
 toggle) to render one mixed sample per break onto T1 only — useful
 for A/B-ing the OT export against the Strudel source.
 
-JSON-mode rendering pulls one-shots from the `wol-samplebank` S3
-bucket (`s3://wol-samplebank/samples/`) and mirrors them to
-`tmp/oneshots/` on first use via `aws s3 sync` — needs AWS
-credentials with read on the bucket. The shared resolver, cache
-layout, and fallback rules live in
-`app/export/common/sample_source.py`. Per-device sample rates
-live in `app/export/common/devices.py`.
+JSON-mode rendering pulls one-shots from the configured S3 bucket
+(`ONESHOT_S3_URI` env var, defaults to `s3://wol-samplebank/samples/`)
+and mirrors them to `<tmp>/oneshots/` on first use via boto3 — on
+Lambda the bucket URI is set as a Pulumi stack config and the
+function's IAM role grants read on it; locally the sync inherits the
+shell's AWS credentials. The shared resolver, cache layout, and
+fallback rules live in `app/export/common/sample_source.py`.
+Per-device sample rates live in `app/export/common/devices.py`.
 
 The `torso-s4/` target keeps a `source` field (`'json'` or `'wav'`,
 default `'json'`) on the binary export request body for the mixed-stem

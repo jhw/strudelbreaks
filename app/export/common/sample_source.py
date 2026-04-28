@@ -11,9 +11,12 @@ Two modes:
   rate. Clean: tempo is correct by construction, sample rate is the
   device's native rate, no resample-on-load.
 
-JSON mode requires a local mirror of the `wol-samplebank` S3 bucket at
-`tmp/oneshots/`. The first JSON-mode call mirrors the bucket via
-`aws s3 sync`; subsequent calls reuse the mirror.
+JSON mode requires a local mirror of the one-shot S3 bucket. The
+bucket URI comes from the `ONESHOT_S3_URI` env var (set as a Pulumi
+config + Lambda env var on deploy); the cache root comes from
+`STRUDELBREAKS_TMP` (defaults to `<repo>/tmp/` for local dev,
+`/tmp/` on Lambda). The first JSON-mode call mirrors the bucket via
+boto3 (no `aws` CLI required); subsequent calls reuse the mirror.
 
 Older gists are WAV-only. JSON mode falls back per-break to WAV when no
 `{name}.json` is in the gist, with a warning, so legacy material still
@@ -25,7 +28,7 @@ get per-drum stems instead of a single mixed render. Used by the
 Octatrack export targets to map each kit piece to its own audio
 track. The torso-s4 target stays on the mixed render.
 
-Cache layout under `tmp/samples/<gistId>/`:
+Cache layout under `<tmp>/samples/<gistId>/`:
 
     <name>.wav                                      gist-fetched WAVs
     json/<name>.json                                gist-fetched JSON patterns
@@ -44,8 +47,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import pathlib
-import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -54,11 +57,32 @@ from typing import Dict, Iterable, Optional, Tuple, Union
 
 log = logging.getLogger(__name__)
 
-ONESHOT_S3_URI = 's3://wol-samplebank/samples/'
+DEFAULT_ONESHOT_S3_URI = 's3://wol-samplebank/samples/'
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-ONESHOT_CACHE = REPO_ROOT / 'tmp' / 'oneshots'
-SAMPLES_CACHE = REPO_ROOT / 'tmp' / 'samples'
+
+
+def _tmp_root() -> pathlib.Path:
+    """Resolve the cache root: `STRUDELBREAKS_TMP` if set, else the
+    repo's `tmp/` (local dev). Lambdas set `STRUDELBREAKS_TMP=/tmp`."""
+    override = os.environ.get('STRUDELBREAKS_TMP')
+    if override:
+        return pathlib.Path(override)
+    return REPO_ROOT / 'tmp'
+
+
+def _oneshot_s3_uri() -> str:
+    """Bucket URI: `ONESHOT_S3_URI` if set, else the legacy default
+    so existing local dev keeps working."""
+    return os.environ.get('ONESHOT_S3_URI', DEFAULT_ONESHOT_S3_URI)
+
+
+def _oneshot_cache() -> pathlib.Path:
+    return _tmp_root() / 'oneshots'
+
+
+def _samples_cache() -> pathlib.Path:
+    return _tmp_root() / 'samples'
 
 VALID_SOURCES = ('json', 'wav')
 
@@ -117,20 +141,52 @@ def cache_json(name: str, gist_base: str, cache_dir: pathlib.Path) -> pathlib.Pa
     return path
 
 
+def _parse_s3_uri(uri: str) -> Tuple[str, str]:
+    """`s3://bucket/prefix/` → `('bucket', 'prefix/')`. Trailing slash
+    on the prefix is preserved so callers can compute relative paths
+    by simple string-strip."""
+    if not uri.startswith('s3://'):
+        raise ValueError(f'expected s3:// URI, got {uri!r}')
+    rest = uri[len('s3://'):]
+    bucket, _, prefix = rest.partition('/')
+    return bucket, prefix
+
+
 def ensure_oneshots_synced(verbose: bool = False) -> pathlib.Path:
-    """If `tmp/oneshots/` is missing or empty, mirror wol-samplebank into
-    it via `aws s3 sync`. Returns the cache path. Raises
-    `CalledProcessError` if the sync fails (most likely AWS auth)."""
-    ONESHOT_CACHE.mkdir(parents=True, exist_ok=True)
-    if any(ONESHOT_CACHE.iterdir()):
-        return ONESHOT_CACHE
-    log.info('Syncing one-shot samples from %s ...', ONESHOT_S3_URI)
-    subprocess.run(
-        ['aws', 's3', 'sync', ONESHOT_S3_URI, str(ONESHOT_CACHE) + '/'],
-        check=True,
-        stdout=None if verbose else subprocess.DEVNULL,
-    )
-    return ONESHOT_CACHE
+    """If the one-shot cache is missing or empty, mirror the configured
+    S3 bucket into it via boto3 (no `aws` CLI required). Returns the
+    cache path. Raises if boto3 / AWS credentials aren't available."""
+    cache = _oneshot_cache()
+    cache.mkdir(parents=True, exist_ok=True)
+    if any(cache.iterdir()):
+        return cache
+
+    uri = _oneshot_s3_uri()
+    bucket, prefix = _parse_s3_uri(uri)
+    log.info('Syncing one-shot samples from %s ...', uri)
+
+    # Local import: boto3 is in the Lambda base image but isn't
+    # required for the WAV-only path, so don't pay the import cost
+    # unless the JSON path actually needs the sync.
+    import boto3  # type: ignore
+
+    s3 = boto3.client('s3')
+    paginator = s3.get_paginator('list_objects_v2')
+    n = 0
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get('Contents') or []:
+            key = obj['Key']
+            rel = key[len(prefix):] if prefix and key.startswith(prefix) else key
+            if not rel or rel.endswith('/'):
+                continue
+            dest = cache / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            s3.download_file(bucket, key, str(dest))
+            n += 1
+            if verbose:
+                log.info('  %s → %s', key, dest)
+    log.info('Synced %d one-shot files', n)
+    return cache
 
 
 def render_json_to_wav(
@@ -217,7 +273,7 @@ def resolve_break_paths(
                 f'tracks must be a subset of {VALID_TRACKS}, got bad: {bad}'
             )
 
-    cache_dir = SAMPLES_CACHE / gist_id
+    cache_dir = _samples_cache() / gist_id
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     wav_urls, gist_base = fetch_manifest(gist_user, gist_id)

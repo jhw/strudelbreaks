@@ -1,0 +1,6 @@
+name: strudelbreaks-pipeline
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: ECR + CodeBuild + S3 artifacts + IAM for the strudelbreaks Lambda image build pipeline.

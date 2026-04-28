@@ -1,0 +1,34 @@
+version: 0.2
+
+# CodeBuild buildspec for the strudelbreaks Lambda image. The
+# pipeline stack (`infra/pipeline`) wires this into a project that
+# pulls source.zip from S3, builds, and pushes to ECR. The deploy
+# script (`scripts/stack/deploy.py`) reads the pushed digest from the
+# build's STDOUT marker line and feeds it to `infra/app`.
+
+env:
+  exported-variables:
+    - IMAGE_DIGEST
+    - IMAGE_URI
+
+phases:
+  pre_build:
+    commands:
+      - echo "Logging in to ECR ($AWS_DEFAULT_REGION)..."
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+      - IMAGE_REPO="$ECR_REGISTRY/$ECR_REPO_NAME"
+      - IMAGE_TAG="${CODEBUILD_RESOLVED_SOURCE_VERSION:-$CODEBUILD_BUILD_ID}"
+  build:
+    commands:
+      - echo "Building image $IMAGE_REPO:$IMAGE_TAG ..."
+      - docker build -t "$IMAGE_REPO:$IMAGE_TAG" -f docker/Dockerfile .
+      - docker tag "$IMAGE_REPO:$IMAGE_TAG" "$IMAGE_REPO:latest"
+  post_build:
+    commands:
+      - echo "Pushing $IMAGE_REPO:$IMAGE_TAG ..."
+      - docker push "$IMAGE_REPO:$IMAGE_TAG"
+      - docker push "$IMAGE_REPO:latest"
+      - IMAGE_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_REPO:$IMAGE_TAG" | cut -d'@' -f2)
+      - IMAGE_URI="$IMAGE_REPO@$IMAGE_DIGEST"
+      - echo "IMAGE_URI=$IMAGE_URI"
+      - echo "IMAGE_DIGEST=$IMAGE_DIGEST"

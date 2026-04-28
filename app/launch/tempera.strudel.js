@@ -301,7 +301,52 @@ let capturesPayload = capturesStore.get() || { ...captureDefault };
 capturesPayload.context = captureContext;
 capturesStore.set(capturesPayload);
 
-const SERVER_URL = 'http://127.0.0.1:8000';
+// Deployed Lambda + API Gateway URL. Override per-environment by
+// editing this constant in the pasted script — the source on jsDelivr
+// stays unauthenticated, so anyone reading it doesn't see anything
+// sensitive.
+const SERVER_URL = 'https://YOUR-API-ID.execute-api.YOUR-REGION.amazonaws.com';
+
+// HTTP Basic credentials for the deployed server, kept in
+// localStorage. Prompted on first export; "forget" via the export
+// menu wipes them. Never embedded in the script source on jsDelivr.
+const AUTH_KEY = 'tempera:auth:' + gistId;
+
+function getAuthCreds() {
+  try {
+    const raw = window.localStorage.getItem(AUTH_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    if (v && typeof v.user === 'string' && typeof v.pass === 'string') return v;
+  } catch (_) { /* fall through */ }
+  return null;
+}
+
+function setAuthCreds(creds) {
+  if (creds) window.localStorage.setItem(AUTH_KEY, JSON.stringify(creds));
+  else window.localStorage.removeItem(AUTH_KEY);
+}
+
+function promptForCreds() {
+  const u = window.prompt('Server username:');
+  if (!u) return null;
+  const p = window.prompt('Server password:');
+  if (!p) return null;
+  const creds = { user: u, pass: p };
+  setAuthCreds(creds);
+  return creds;
+}
+
+function authHeader() {
+  const c = getAuthCreds() || promptForCreds();
+  if (!c) return null;
+  // btoa is Latin-1 only; UTF-8 encode in case the password has
+  // non-ASCII characters.
+  const bytes = new TextEncoder().encode(c.user + ':' + c.pass);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return 'Basic ' + btoa(bin);
+}
 
 const EXPORT_TARGETS = [
   { label: 'json',      kind: 'local'  },
@@ -311,12 +356,23 @@ const EXPORT_TARGETS = [
   { label: 'torso-s4',  kind: 'binary', target: 'torso-s4' },
 ];
 
-async function postExport(endpointPath, body) {
-  const r = await fetch(SERVER_URL + endpointPath, {
+async function postExport(target, body) {
+  const auth = authHeader();
+  if (!auth) throw new Error('auth credentials required');
+  const r = await fetch(SERVER_URL + '/api/export/' + target, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': auth,
+    },
     body: JSON.stringify(body),
   });
+  if (r.status === 401 || r.status === 403) {
+    // Wipe stored creds so the next attempt re-prompts; one bad
+    // password shouldn't permanently lock the user out.
+    setAuthCreds(null);
+    throw new Error('HTTP ' + r.status + ': bad credentials (forgotten — try again)');
+  }
   if (!r.ok) {
     let detail = '';
     try { detail = await r.text(); } catch (_) { /* ignore */ }
@@ -349,22 +405,16 @@ const exportConfig = {
 };
 
 async function exportViaServer(spec) {
-  const endpointPath = spec.kind === 'text'
-    ? '/api/export/text'
-    : '/api/export/binary';
-  const body = {
-    target: spec.target,
-    payload: capturesPayload,
-  };
+  const body = { payload: capturesPayload };
   if (spec.target === 'ot-basic' || spec.target === 'ot-doom') {
     body.split_stems = exportConfig.splitStems;
   }
   try {
-    const { filename, blob } = await postExport(endpointPath, body);
+    const { filename, blob } = await postExport(spec.target, body);
     downloadAs(blob, filename);
   } catch (e) {
     console.error('[tempera] export failed:', e);
-    notify('Export failed: ' + e.message + ' (server up? ./scripts/run.sh)');
+    notify('Export failed: ' + e.message);
   }
 }
 
@@ -379,14 +429,13 @@ async function exportViaServer(spec) {
 async function openInStrudel(spec) {
   let filename, blob, text;
   try {
-    ({ filename, blob } = await postExport('/api/export/text', {
-      target: spec.target,
+    ({ filename, blob } = await postExport(spec.target, {
       payload: capturesPayload,
     }));
     text = await blob.text();
   } catch (e) {
     console.error('[tempera] strudel export failed:', e);
-    notify('Strudel export failed: ' + e.message + ' (server up? ./scripts/run.sh)');
+    notify('Strudel export failed: ' + e.message);
     return;
   }
 

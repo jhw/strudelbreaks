@@ -1,0 +1,6 @@
+name: strudelbreaks-app
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: Four container Lambdas (one per export target) behind an HTTP API.

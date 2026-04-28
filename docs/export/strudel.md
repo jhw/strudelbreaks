@@ -10,8 +10,8 @@ breaks/patterns from the export baked in as literal mini-notation
 strings.
 
 Invocation: tempera's `export ▾` menu → `strudel`. Tempera POSTs the
-captures payload to `POST /api/export/text` (`target='strudel'`); the
-server calls `app.export.strudel.render.render()` and streams the
+captures payload to `POST /api/export/strudel`; the server calls
+`app.export.strudel.render.render()` and streams the
 rendered template back; the browser opens
 `https://strudel.cc/#<base64-of-utf8>` in a new tab so strudel.cc
 loads the export directly rather than restoring whatever its own

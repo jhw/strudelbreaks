@@ -6,7 +6,7 @@ sweeps continuously between the cells of each row — different captured
 patterns become a single morphable timeline.
 
 Invocation: tempera's `export ▾` menu → `ot-doom`. Posts the captures
-payload to `POST /api/export/binary` (`target='ot-doom'`); the server
+payload to `POST /api/export/ot-doom`; the server
 calls `app.export.octatrack.ot_doom.render.render()` and streams the
 project zip back. Browser saves to `~/Downloads/<name>.ot-doom.zip`.
 

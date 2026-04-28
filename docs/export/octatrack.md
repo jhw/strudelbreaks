@@ -15,7 +15,7 @@ cycles. Source breaks are loaded into 16-slice flex slots once per
 project, **three slots per break** (kick, snare, hat).
 
 Invocation: tempera's `export ▾` menu → `ot-basic`. Posts the captures
-payload to `POST /api/export/binary` (`target='ot-basic'`); the server
+payload to `POST /api/export/ot-basic`; the server
 calls `app.export.octatrack.ot_basic.render.render()` and streams the
 project zip back. Browser saves to `~/Downloads/<name>.ot-basic.zip`.
 

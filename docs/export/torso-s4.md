@@ -24,7 +24,7 @@ polymetric-stretched per `STRUDEL.md`). Output bundle:
 reserves `/samples/` for user-imported WAVs.
 
 Invocation: tempera's `export ▾` menu → `torso-s4`. Posts the captures
-payload to `POST /api/export/binary` (`target='torso-s4'`); the server
+payload to `POST /api/export/torso-s4`; the server
 calls `app.export.torso_s4.render.render()` and streams the project
 zip back. Browser saves to `~/Downloads/<name>.s4.zip`.
 
