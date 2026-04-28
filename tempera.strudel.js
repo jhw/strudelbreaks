@@ -431,28 +431,34 @@ const exportBtn = SB.ui.createButton('export ▾', function (e) {
     onClose: () => { exportMenu = null; },
   });
 });
-// Captures toolbar: new-row + export buttons + split-stems toggle.
-// All three are pre-built elements appended to a single createFormBar
-// so the boolean switch sits inline with the action buttons rather
-// than in its own panel.
+// Captures toolbar: action buttons in their own bar, export-config
+// toggle in a second bar stacked beneath. Splitting them lets the
+// action buttons share a consistent min-width while the toggle keeps
+// its natural label+track size without forcing a wide gutter.
+const capturesToolbar = SB.ui.createFormBar({
+  corner: 'top-right', id: 'captures-toolbar',
+  stack: 'log-display',
+  itemMinWidth: '90px',
+  items: [
+    SB.ui.createButton('new row', newRow),
+    exportBtn,
+  ],
+});
+
 const splitStemsToggle = SB.ui.createToggleSwitch({
   label: 'split stems',
   initial: exportConfig.splitStems,
   onChange: (v) => { exportConfig.splitStems = v; },
 });
-const capturesToolbar = SB.ui.createFormBar({
-  corner: 'top-right', id: 'captures-toolbar',
-  stack: 'log-display',
-  items: [
-    SB.ui.createButton('new row', newRow),
-    exportBtn,
-    splitStemsToggle.element,
-  ],
+const exportConfigBar = SB.ui.createFormBar({
+  corner: 'top-right', id: 'export-config-bar',
+  stack: 'captures-toolbar',
+  items: [splitStemsToggle.element],
 });
 
 const capturesList = SB.ui.createCornerPanel({
   corner: 'top-right', id: 'captures-list',
-  stack: 'captures-toolbar',
+  stack: 'export-config-bar',
   style: 'padding:8px 10px;max-width:600px',
 });
 const listEl = document.createElement('div');
@@ -463,7 +469,6 @@ listEl.style.cssText = 'overflow-y:auto;min-height:1.4em;max-height:45vh';
 capturesList.element.appendChild(listEl);
 
 function deleteRow(i) {
-  if (!window.confirm('Delete row ' + i + '?')) return;
   capturesPayload.banks.splice(i, 1);
   capturesStore.set(capturesPayload);
   renderCaptures();
