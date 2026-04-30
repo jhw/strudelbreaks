@@ -124,14 +124,15 @@ WAV>), 16)`. For each event `i` in the cell:
      silence;
    - otherwise write `equal_slices(stem_break_wav, 16)[cell.pattern[i]]`,
      the captured slice of the **stem's** source break for that event.
-3. Concatenate the 8 events end-to-end. **No fades** — Strudel doesn't
-   apply per-event fades, and adding them on the OT side produces a
-   periodic loudness dip relative to Strudel that's small but
-   audible. If pathological patterns surface clicks at slice
-   boundaries we'll reintroduce a sub-perceptual envelope (≤ 0.5 ms)
-   here only — never inside `build_matrix_chain`, where boundaries
-   lie inside whatever envelope this step produced and a second pass
-   would double-attenuate.
+3. Concatenate the 8 events end-to-end with an asymmetric per-event
+   fade envelope (default 1 ms in / 2 ms out, override via `fade_in_ms`
+   / `fade_out_ms` on `render()`). The short fade-in keeps drum attack
+   intact; the slightly longer fade-out kills click artefacts at the
+   trailing edge where they're most audible on percussive tails. The
+   envelope is applied here only — never inside `build_matrix_chain`,
+   where chain segments are slices of already-faded cell audio and a
+   second pass would either double-attenuate event boundaries or punch
+   a volume dip into the middle of a sample.
 
 The result is `8 * (1/8 note) = 1 bar` of audio per stem (3 bars
 total per cell).
@@ -283,9 +284,10 @@ after the response is streamed.
 - **Pattern fidelity at slice boundaries.** Chain segments are
   rendered at `bar_ms / N` and concatenated; if `bar_ms / N` doesn't
   divide cleanly into the source-slice grid, segment boundaries cut
-  through note attacks. We ship with no fades (matching Strudel) —
-  if pathological inputs cause audible clicks at segment cuts, the
-  fix is a sub-perceptual envelope inside `render_cell_audio` only.
+  through note attacks. The per-event fade envelope (1 ms in / 2 ms
+  out) inside `render_cell_audio` suppresses click artefacts at event
+  boundaries; chain-segment boundaries inherit whatever envelope
+  fell at that point inside the cell render.
   Keep N to powers of 2 so segment boundaries align with event
   boundaries: tempera's 1-bar cells with `events_per_cycle = 8` mean
   N=4 cuts at every other event, N=8 cuts at every event, N=16

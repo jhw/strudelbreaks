@@ -69,6 +69,10 @@ from octapy import (
 )
 
 from app.export.common import sample_source
+from app.export.common.audio_fades import (
+    DEFAULT_FADE_IN_MS,
+    DEFAULT_FADE_OUT_MS,
+)
 from app.export.common.schema import load_export
 
 from .audio import (
@@ -174,6 +178,9 @@ def _render_row_chains(
     stem_tracks,
     source_slice_cache,
     bank_render_dir,
+    *,
+    fade_in_ms,
+    fade_out_ms,
 ):
     """Render a row's audio per stem, stack into per-position packed
     chains, write WAVs, register flex slots.
@@ -199,7 +206,9 @@ def _render_row_chains(
     for stem in stem_tracks:
         stem_slices = _per_stem_source_slices(source_slice_cache, stem)
         per_stem_inputs[stem] = [
-            render_cell_audio(cell, stem_slices, events_per_cycle)
+            render_cell_audio(cell, stem_slices, events_per_cycle,
+                              fade_in_ms=fade_in_ms,
+                              fade_out_ms=fade_out_ms)
             for cell in cells
         ]
 
@@ -287,6 +296,9 @@ def render_bank(
     stem_tracks,
     source_slice_cache,
     bank_render_dir,
+    *,
+    fade_in_ms,
+    fade_out_ms,
 ):
     """Render up to PATTERNS_PER_BANK rows into one OT bank.
 
@@ -324,6 +336,8 @@ def render_bank(
             project, bank_num, pattern_idx + 1, cells,
             events_per_cycle, stem_tracks,
             source_slice_cache, bank_render_dir,
+            fade_in_ms=fade_in_ms,
+            fade_out_ms=fade_out_ms,
         )
         pattern_slots.append(slots)
 
@@ -366,7 +380,9 @@ def _resolve_stem_paths(*, gist_user, gist_id, names, target_bpm, stem_tracks):
     )
 
 
-def build_project(export_path, name, *, split_stems=True, render_dir=None):
+def build_project(export_path, name, *, split_stems=True, render_dir=None,
+                  fade_in_ms=DEFAULT_FADE_IN_MS,
+                  fade_out_ms=DEFAULT_FADE_OUT_MS):
     payload, ctx = load_export(export_path, REQUIRED_CTX)
     if ctx['nSlices'] != N_SLICES:
         sys.exit(f'nSlices {ctx["nSlices"]} != {N_SLICES} (ot-doom assumes 16)')
@@ -439,16 +455,22 @@ def build_project(export_path, name, *, split_stems=True, render_dir=None):
             stem_tracks,
             source_slice_cache,
             row_render_root / f'bank{bank_num:02d}',
+            fade_in_ms=fade_in_ms,
+            fade_out_ms=fade_out_ms,
         )
 
     return project
 
 
 def render(export_path, name, *, split_stems=True,
-           output_dir=None, render_dir=None):
+           output_dir=None, render_dir=None,
+           fade_in_ms=DEFAULT_FADE_IN_MS,
+           fade_out_ms=DEFAULT_FADE_OUT_MS):
     project = build_project(export_path, name,
                             split_stems=split_stems,
-                            render_dir=render_dir)
+                            render_dir=render_dir,
+                            fade_in_ms=fade_in_ms,
+                            fade_out_ms=fade_out_ms)
     out_dir = pathlib.Path(output_dir) if output_dir is not None else OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     zip_path = out_dir / f'{name}.zip'

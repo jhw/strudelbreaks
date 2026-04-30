@@ -10,12 +10,12 @@ with the three per-stem chains stacked into one packed sample of
 per-track scenes addressing the kick / snare / hat slice ranges
 (stem i occupies slices i*N .. i*N + (N-1)).
 
-No fades anywhere — Strudel doesn't apply per-event or per-segment
-fades and the OT side should match it. If pathological patterns cause
-audible pops at slice boundaries, reintroduce a sub-perceptual envelope
-(0.3 ms / 0.5 ms) at `render_cell_audio` only — never at the
-matrix-chain stage, where boundaries already lie inside whatever
-envelope `render_cell_audio` produced.
+Per-event fade envelope (1 ms in / 2 ms out by default) is applied
+inside `render_cell_audio` to suppress click artefacts at event
+boundaries. **Not** applied at chain assembly — chain segments are
+slices of already-faded cell audio, so re-fading them would either
+double-attenuate event boundaries or punch a volume dip into the
+middle of a sample. See app/export/common/audio_fades.py.
 
 Rests (`pattern[i] is None`) become silence segments of one source-slice's
 length.
@@ -27,6 +27,11 @@ from typing import Dict, List
 
 from pydub import AudioSegment
 
+from app.export.common.audio_fades import (
+    DEFAULT_FADE_IN_MS,
+    DEFAULT_FADE_OUT_MS,
+    apply_envelope,
+)
 from app.export.common.devices import OT_SAMPLE_RATE
 
 # Octatrack plays back assuming OT_SAMPLE_RATE (44100 Hz); a 48 kHz
@@ -66,6 +71,9 @@ def render_cell_audio(
     cell: dict,
     source_slices: Dict[str, List[AudioSegment]],
     events_per_cycle: int,
+    *,
+    fade_in_ms: int = DEFAULT_FADE_IN_MS,
+    fade_out_ms: int = DEFAULT_FADE_OUT_MS,
 ) -> AudioSegment:
     """Render one captured cell to one bar of audio.
 
@@ -75,7 +83,9 @@ def render_cell_audio(
     captured slice index per event (or None for a rest).
 
     For each event: append the corresponding source slice (or a slice's
-    worth of silence on rest), with the asymmetric fade envelope.
+    worth of silence on rest), with the asymmetric fade envelope to
+    suppress click artefacts at event boundaries. Pass `0` to either
+    fade kwarg to disable that side of the envelope.
     """
     break_names = cell['break']
     m = len(break_names)
@@ -97,6 +107,8 @@ def render_cell_audio(
             name = break_names[i * m // events_per_cycle]
             piece = source_slices[name][slice_idx]
             piece = _fit_to_ms(piece, slice_ms)
+            piece = apply_envelope(piece, fade_in_ms=fade_in_ms,
+                                   fade_out_ms=fade_out_ms)
         out += piece
     return out
 

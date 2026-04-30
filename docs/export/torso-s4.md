@@ -64,10 +64,11 @@ reasons:
 1. **Reproducibility.** Two runs of the renderer over the same export
    produce byte-identical WAVs, regardless of the source rates the
    gist serves up.
-2. **Headroom for upstream fades / envelopes.** If we ever reintroduce
-   a sub-perceptual fade envelope inside `render_cell`, the higher
-   sample rate gives that fade better resolution at the boundary
-   sample. Cheap insurance for future work.
+2. **Headroom for upstream fades / envelopes.** The per-event fade
+   envelope inside `render_cell` (1 ms in / 2 ms out by default) gets
+   better resolution at the higher sample rate — 96 samples per ms
+   versus ~44 at 44.1 kHz means the gain ramp lands smoother at the
+   boundary.
 
 The cost is upsampling 44.1 / 48 kHz sources to 96 kHz (WAV-source
 mode) or rendering at 96 kHz directly (JSON-source mode). Either way

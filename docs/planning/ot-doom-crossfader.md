@@ -2,9 +2,10 @@
 
 The ot-doom matrix-chain design hands the crossfader N inputs per
 stem and expects the fader to walk between them at uniform 1/N
-fractions. In practice the transitions land in the wrong places.
-This file captures what we know, what we've tried, and what to do
-next time we sit down with the device.
+fractions. In practice the transitions land in the wrong places,
+and the placement isn't even deterministic — it shifts with sweep
+direction and prior history. This file captures what we know and
+why we can't compensate for it in the renderer.
 
 ## Symptom
 
@@ -54,47 +55,34 @@ We haven't ruled any of these out. The user-observed 6 / 11 / 15
 shows the error growing with index, which fits a non-linear
 mapping more than a constant offset.
 
-## Calibration plan (~30 min on the device)
+## Why a lookup table won't work
 
-Build a sandbox OT project with a single packed sample:
+The natural compensation strategy — measure `fader → played_slice`
+on the device, fit the inverse, and rewrite scene `slice_index`
+values so the result is fader-uniform — assumes the mapping is a
+deterministic function of fader position. It isn't.
 
-- N = 4 silent slices replaced with sine tones at distinguishable
-  pitches (e.g. 100, 200, 400, 800 Hz).
-- T1 sample-locked, slice mode ON.
-- Scene A `slice_index = 0`, scene B `slice_index = N - 1`.
-- Pattern with one trig at step 1 looping at any tempo.
+Empirically the played slice at a given fader position depends on:
 
-Walk the crossfader from full-left to full-right in small steps.
-Note the fader position (display value) at which the played tone
-changes, and which tone plays at each position. The result is a
-ground-truth `fader → played_slice` lookup table for the live
-firmware.
+- **Sweep direction.** Walking the fader A → B and stopping at
+  position p gives a different played slice than walking B → A
+  and stopping at the same p.
+- **Sweep history.** Repeated sweeps of the same range land on
+  different slice transitions on different passes.
 
-From the table:
+A static lookup table can't represent that. Whatever smoothing /
+filtering / hysteresis the firmware applies between the encoder
+and the scene-driven `slice_index` lerp has internal state we
+can't observe and can't predict from the on-disk project format.
+No correction we apply at render time will be the right one for
+every gesture, so we don't apply one.
 
-1. Fit the actual rounding rule (floor / round / ceil / other).
-2. Confirm whether the lerp is linear in fader value or something
-   else.
-3. Derive the scene-B slice_index that gives uniform 1/N bands
-   under the actual rule, and update `_configure_part` in
-   `app/export/octatrack/ot_doom/render.py`.
+## What we won't do
 
-A `tools/calibrate_ot.py` could synthesise this project on demand
-— build it when we're ready to do the calibration pass.
-
-## Quick guess to test in parallel
-
-If the empirical 6 / 11 / 15 means the lerp reaches slice
-boundaries slightly later than predicted, pushing scene B further
-should compensate: `slice_index = N` (the +1 design, but applied
-on top of the current N-slice layout — pad each stem block with
-one silent or duplicate slice). Worth running alongside the
-calibration to see if the simple shift closes the gap.
-
-## What we won't do without data
-
-- Add more rounding heuristics inside the renderer. Each guess
-  costs a device round-trip. Calibrate first, then code.
+- Build a calibration tool or lookup table — see above.
+- Add rounding heuristics inside the renderer. Any guess that
+  improves one gesture will harm another given the directional /
+  history dependency.
 - Switch to per-trig `slice_index` locks. That breaks the scene
   morph entirely (per-trig locks override scene STRT — see
   `docs/planning/ot-doom-packing.md` for the longer write-up).

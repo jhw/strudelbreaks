@@ -34,6 +34,10 @@ import sys
 import zipfile
 
 from app.export.common import sample_source
+from app.export.common.audio_fades import (
+    DEFAULT_FADE_IN_MS,
+    DEFAULT_FADE_OUT_MS,
+)
 from app.export.common.names import generate_name
 from app.export.common.schema import load_export
 
@@ -89,7 +93,9 @@ def unique_row_names(rng, count):
     return out
 
 
-def build_row_wavs(export_path, name, seed=None, source='json'):
+def build_row_wavs(export_path, name, seed=None, source='json',
+                   fade_in_ms=DEFAULT_FADE_IN_MS,
+                   fade_out_ms=DEFAULT_FADE_OUT_MS):
     """Return a list of (filename, AudioSegment) for each non-empty row."""
     payload, ctx = load_export(export_path, REQUIRED_CTX)
     if ctx['nSlices'] != N_SLICES:
@@ -129,7 +135,8 @@ def build_row_wavs(export_path, name, seed=None, source='json'):
     out = []
     for row_idx, bank_cells in enumerate(banks_in):
         cells = [
-            render_cell(source_slices, cell['break'], cell['pattern'], ev_ms)
+            render_cell(source_slices, cell['break'], cell['pattern'], ev_ms,
+                        fade_in_ms=fade_in_ms, fade_out_ms=fade_out_ms)
             for cell in bank_cells
         ]
         row_seg = render_row(cells)
@@ -138,9 +145,12 @@ def build_row_wavs(export_path, name, seed=None, source='json'):
 
 
 def render(export_path, name, *, seed=None, source='json',
-           output_dir=None, render_dir=None):
+           output_dir=None, render_dir=None,
+           fade_in_ms=DEFAULT_FADE_IN_MS,
+           fade_out_ms=DEFAULT_FADE_OUT_MS):
     """Render an export → project zip; return the zip path."""
-    rows = build_row_wavs(export_path, name, seed=seed, source=source)
+    rows = build_row_wavs(export_path, name, seed=seed, source=source,
+                          fade_in_ms=fade_in_ms, fade_out_ms=fade_out_ms)
 
     render_root = pathlib.Path(render_dir) if render_dir is not None else RENDER_DIR
     project_render_dir = render_root / name

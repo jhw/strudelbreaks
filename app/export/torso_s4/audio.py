@@ -7,12 +7,11 @@ the source-break slice for that event, and concatenating.
 
 A row is then a plain concat of its cells.
 
-No fades anywhere — Strudel doesn't apply per-event fades, and the
-asymmetric envelope used to ship here introduced an audible periodic
-loudness dip relative to Strudel playback. Same reasoning as
-ot-doom/audio.py: if pathological patterns surface clicks at slice
-boundaries, reintroduce a sub-perceptual envelope (≤ 0.5 ms) inside
-`render_cell` only.
+Per-event fade envelope (1 ms in / 2 ms out by default) is applied
+inside `render_cell` to suppress click artefacts at event boundaries.
+Apply only at the event-concat stage — never at row assembly, where
+boundaries lie inside whatever envelope `render_cell` produced. See
+app/export/common/audio_fades.py.
 
 All rendered output ships at 96 kHz, the S-4's max-supported sample
 rate per the manual; see docs/export/torso-s4.md for the rationale and tradeoffs.
@@ -32,6 +31,11 @@ from typing import Dict, List, Optional
 
 from pydub import AudioSegment
 
+from app.export.common.audio_fades import (
+    DEFAULT_FADE_IN_MS,
+    DEFAULT_FADE_OUT_MS,
+    apply_envelope,
+)
 from app.export.common.devices import S4_SAMPLE_RATE
 
 # Torso S-4 native ceiling; everything we ship lands at S4_SAMPLE_RATE.
@@ -68,6 +72,9 @@ def render_cell(
     break_names: List[str],
     pattern_idxs: List[Optional[int]],
     event_ms: float,
+    *,
+    fade_in_ms: int = DEFAULT_FADE_IN_MS,
+    fade_out_ms: int = DEFAULT_FADE_OUT_MS,
 ) -> AudioSegment:
     """Render one captured cell to a 1-bar AudioSegment.
 
@@ -80,6 +87,9 @@ def render_cell(
             integer-ms boundaries are computed cumulatively so the total
             cell length equals `round(N * event_ms)` exactly — no
             rounding drift across long rows.
+        fade_in_ms / fade_out_ms: per-event envelope applied to non-rest
+            pieces to suppress click artefacts at event boundaries. Pass
+            `0` to either to disable that side of the envelope.
 
     Returns:
         AudioSegment of length `round(len(pattern_idxs) * event_ms)` ms.
@@ -99,7 +109,9 @@ def render_cell(
             seg = AudioSegment.silent(duration=this_event_ms, frame_rate=rate)
         else:
             seg = source_slices[name][slice_idx]
-        seg = _fit_to_ms(seg, this_event_ms)
+            seg = _fit_to_ms(seg, this_event_ms)
+            seg = apply_envelope(seg, fade_in_ms=fade_in_ms,
+                                 fade_out_ms=fade_out_ms)
         out += seg
     return out
 
