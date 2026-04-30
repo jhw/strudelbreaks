@@ -21,7 +21,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import config
-from app.routes import binary_export, text_export
+from app.routes import binary_export, launch, text_export
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,6 +49,7 @@ app.add_middleware(
 
 app.include_router(text_export.router)
 app.include_router(binary_export.router)
+app.include_router(launch.router)
 
 
 @app.get('/')
