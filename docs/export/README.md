@@ -60,5 +60,5 @@ module here is imported and called by `app/exporters.py`.
 `STRUDEL.md` (repo root) is the language / transpile reference —
 double-quote-to-Pattern lifting, slider literal-args constraint,
 polymetric stretch, runtime-string lifting via `.fmap(mini).innerJoin()`.
-Relevant when editing `tempera.strudel.js` or the
+Relevant when editing `app/launch/tempera.strudel.js` or the
 `app/export/strudel/templates/` Jinja2 source.

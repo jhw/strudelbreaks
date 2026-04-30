@@ -313,4 +313,4 @@ after the response is streamed.
 - octapy: `AudioSceneTrack.slice_index` (≥ 0.1.23).
 - `STRUDEL.md` (repo root) — Strudel transpile rules, polymetric stretch,
   and the captures-side mini-notation. Useful when iterating on
-  `tempera.strudel.js`.
+  `app/launch/tempera.strudel.js`.

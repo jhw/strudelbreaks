@@ -5,7 +5,7 @@ targets (`octatrack`, `ot-doom`, `torso-s4`), this one renders no
 audio. It generates a standalone `.strudel.js` file that loads the
 sample gist at runtime via `samples(gistUrl)` and plays back the
 captured rows through Strudel's pattern graph — same playback
-contract as `tempera.strudel.js` at the repo root, just with the
+contract as `app/launch/tempera.strudel.js`, just with the
 breaks/patterns from the export baked in as literal mini-notation
 strings.
 
@@ -56,7 +56,7 @@ non-literal range arguments don't render correctly — see
 
 ## Why this is split out from `tempera.strudel.js`
 
-Tempera (`tempera.strudel.js` at the repo root) is the **capture**
+Tempera (`app/launch/tempera.strudel.js`) is the **capture**
 template — it generates breaks/patterns at load time from a seeded
 RNG, surfaces sliders + a captures HUD, and persists captures to
 `localStorage`. The captures get exported as a JSON payload.
@@ -68,8 +68,8 @@ for sharing a finished arrangement as a single `.strudel.js` paste.
 
 ## References
 
-- `tempera.strudel.js` — the capture-side template this playback
-  template mirrors.
+- `app/launch/tempera.strudel.js` — the capture-side template this
+  playback template mirrors.
 - `STRUDEL.md` (repo root) — Strudel transpile rules and runtime quirks
   relevant when editing either template.
 - `app/export/strudel/templates/playback.strudel.js.j2` — the

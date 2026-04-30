@@ -206,12 +206,13 @@ no version pinning.
 
 ## Export targets
 
-Tempera (`tempera.strudel.js`) persists captures to `localStorage` and
-exposes a per-format export menu. Selecting a format POSTs the
-in-memory payload to the local FastAPI server in `app/`, which renders
-the artifact via the modules in `app/export/` and streams it back
-as a download. The browser saves it to `~/Downloads/`; per-device
-push scripts copy from there onto the device.
+Tempera (`app/launch/tempera.strudel.js`) persists captures to
+`localStorage` and exposes a per-format export menu. Selecting a
+format POSTs the in-memory payload to the local FastAPI server in
+`app/`, which renders the artifact via the modules in `app/export/`
+and streams it back as a download. The browser saves it to
+`~/Downloads/`; per-device push scripts copy from there onto the
+device.
 
 | Target | Filename | Doc |
 |---|---|---|
@@ -365,10 +366,14 @@ Coverage:
 
 ## Demo
 
-`tempera.strudel.js` at the repo root is a thin breakbeat template
-that loads this library from jsDelivr and drives it with four sliders
+`app/launch/tempera.strudel.js` is a thin breakbeat template that
+loads this library from jsDelivr and drives it with four sliders
 (`rootBreak`, `altBreak`, `pattern`, `prob`) plus a live `delay`
-control. Paste it into [Strudel](https://strudel.cc/) to jam.
+control. With the server running, navigate to
+`http://127.0.0.1:8000/launch` (optional `?gistUser=&gistId=` query
+params bake a different sample gist into the template) — strudel.cc
+opens with the template embedded in the URL hash. Or copy the file
+manually into [Strudel](https://strudel.cc/) to jam.
 
 ## Prior art
 

@@ -1,6 +1,6 @@
 """One-click launcher for tempera.strudel.js.
 
-`GET /launch` reads tempera.strudel.js from the repo root, optionally
+`GET /launch` reads the sibling tempera.strudel.js, optionally
 rewrites the `gistUser` / `gistId` literals from query params, base64s
 the UTF-8 bytes, and 302-redirects to `https://strudel.cc/#<base64>`
 — strudel.cc decodes the hash on load and drops the program straight
@@ -25,8 +25,8 @@ from fastapi.responses import RedirectResponse
 
 router = APIRouter()
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-TEMPERA_PATH = REPO_ROOT / 'tempera.strudel.js'
+PACKAGE_DIR = pathlib.Path(__file__).resolve().parent
+TEMPERA_PATH = PACKAGE_DIR / 'tempera.strudel.js'
 
 # Validate query inputs before splicing them into JS source. GitHub
 # usernames: 1-39 alphanumeric chars + internal hyphens. Gist ids in
