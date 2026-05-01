@@ -17,7 +17,11 @@ phases:
       - echo "Logging in to ECR ($AWS_DEFAULT_REGION)..."
       - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
       - IMAGE_REPO="$ECR_REGISTRY/$ECR_REPO_NAME"
-      - IMAGE_TAG="${CODEBUILD_RESOLVED_SOURCE_VERSION:-$CODEBUILD_BUILD_ID}"
+      # CODEBUILD_BUILD_ID is `project:uuid`; the colon is illegal in a
+      # Docker tag, so strip everything before it. CODEBUILD_RESOLVED_
+      # SOURCE_VERSION is empty for S3-source builds, so we don't even
+      # bother trying it as a fallback.
+      - IMAGE_TAG="${CODEBUILD_BUILD_ID##*:}"
   build:
     commands:
       - echo "Building image $IMAGE_REPO:$IMAGE_TAG ..."
