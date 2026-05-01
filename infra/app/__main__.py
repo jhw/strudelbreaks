@@ -152,7 +152,6 @@ def _make_lambda(spec: dict) -> aws.lambda_.Function:
         },
         opts=pulumi.ResourceOptions(depends_on=[log_group]),
     )
-    method, _, _ = spec['route_key'].partition(' ')
     aws.lambda_.Permission(
         f'{fn_name}-apigw',
         action='lambda:InvokeFunction',
@@ -160,11 +159,17 @@ def _make_lambda(spec: dict) -> aws.lambda_.Function:
         principal='apigateway.amazonaws.com',
         source_arn=pulumi.Output.concat(api.execution_arn, '/*/*'),
     )
+    # AWS_PROXY integrations always invoke the Lambda over POST,
+    # regardless of the *route's* HTTP method (which is captured in
+    # `route_key` below — `GET /launch` for the launch route, `POST
+    # /api/export/...` for the rest). Setting integration_method to
+    # anything other than POST trips API Gateway's "HttpMethod must be
+    # POST for AWS_PROXY" validator.
     integration = aws.apigatewayv2.Integration(
         f'{fn_name}-integration',
         api_id=api.id,
         integration_type='AWS_PROXY',
-        integration_method=method,
+        integration_method='POST',
         integration_uri=fn.invoke_arn,
         payload_format_version='2.0',
     )
