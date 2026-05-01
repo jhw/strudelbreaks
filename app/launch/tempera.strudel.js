@@ -301,51 +301,21 @@ let capturesPayload = capturesStore.get() || { ...captureDefault };
 capturesPayload.context = captureContext;
 capturesStore.set(capturesPayload);
 
-// Deployed Lambda + API Gateway URL. Override per-environment by
-// editing this constant in the pasted script — the source on jsDelivr
-// stays unauthenticated, so anyone reading it doesn't see anything
-// sensitive.
-const SERVER_URL = 'https://YOUR-API-ID.execute-api.YOUR-REGION.amazonaws.com';
-
-// HTTP Basic credentials for the deployed server, kept in
-// localStorage. Prompted on first export; "forget" via the export
-// menu wipes them. Never embedded in the script source on jsDelivr.
-const AUTH_KEY = 'tempera:auth:' + gistId;
-
-function getAuthCreds() {
-  try {
-    const raw = window.localStorage.getItem(AUTH_KEY);
-    if (!raw) return null;
-    const v = JSON.parse(raw);
-    if (v && typeof v.user === 'string' && typeof v.pass === 'string') return v;
-  } catch (_) { /* fall through */ }
-  return null;
-}
-
-function setAuthCreds(creds) {
-  if (creds) window.localStorage.setItem(AUTH_KEY, JSON.stringify(creds));
-  else window.localStorage.removeItem(AUTH_KEY);
-}
-
-function promptForCreds() {
-  const u = window.prompt('Server username:');
-  if (!u) return null;
-  const p = window.prompt('Server password:');
-  if (!p) return null;
-  const creds = { user: u, pass: p };
-  setAuthCreds(creds);
-  return creds;
-}
+// Server endpoint + auth header. Both are baked in by the /launch
+// handler before this template is served — see app/api/launch/handler.py
+// (`REWRITES`). The defaults below are placeholders the handler
+// rewrites at request time; the version on jsDelivr (no /launch
+// preamble) is fine to ship with empty values because tempera there is
+// only used for local Strudel playback.
+//
+// Anyone with the AUTH_TOKEN can hit /launch, and /launch is what
+// surfaces these creds, so a leaked template carries no privilege the
+// reader didn't already have.
+const SERVER_URL = '';
+const AUTH_HEADER = '';
 
 function authHeader() {
-  const c = getAuthCreds() || promptForCreds();
-  if (!c) return null;
-  // btoa is Latin-1 only; UTF-8 encode in case the password has
-  // non-ASCII characters.
-  const bytes = new TextEncoder().encode(c.user + ':' + c.pass);
-  let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  return 'Basic ' + btoa(bin);
+  return AUTH_HEADER || null;
 }
 
 const EXPORT_TARGETS = [
@@ -357,21 +327,19 @@ const EXPORT_TARGETS = [
 ];
 
 async function postExport(target, body) {
+  if (!SERVER_URL) {
+    throw new Error('SERVER_URL is empty — load tempera via /launch on the deployed server');
+  }
   const auth = authHeader();
-  if (!auth) throw new Error('auth credentials required');
+  const headers = { 'Content-Type': 'application/json' };
+  if (auth) headers['Authorization'] = auth;
   const r = await fetch(SERVER_URL + '/api/export/' + target, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': auth,
-    },
+    headers,
     body: JSON.stringify(body),
   });
   if (r.status === 401 || r.status === 403) {
-    // Wipe stored creds so the next attempt re-prompts; one bad
-    // password shouldn't permanently lock the user out.
-    setAuthCreds(null);
-    throw new Error('HTTP ' + r.status + ': bad credentials (forgotten — try again)');
+    throw new Error('HTTP ' + r.status + ': server rejected baked credentials — re-launch via /launch to refresh');
   }
   if (!r.ok) {
     let detail = '';

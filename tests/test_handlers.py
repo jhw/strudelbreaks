@@ -138,10 +138,11 @@ class LaunchHandlerTest(unittest.TestCase):
     + the auth gate."""
 
     @staticmethod
-    def _event(qs=None, headers=None):
+    def _event(qs=None, headers=None, domain='strudelbeats.klingklangwol.com'):
         return {
             'queryStringParameters': qs,
             'headers': headers or {},
+            'requestContext': {'domainName': domain} if domain else {},
         }
 
     @staticmethod
@@ -158,6 +159,38 @@ class LaunchHandlerTest(unittest.TestCase):
         self.assertIn("const gistUser = 'jhw';", src)
         self.assertIn('const BPM = 128;', src)
         self.assertIn('const SEED = 22682;', src)
+        # SERVER_URL gets baked from requestContext.domainName even
+        # when no override is supplied.
+        self.assertIn(
+            "const SERVER_URL = 'https://strudelbeats.klingklangwol.com';",
+            src,
+        )
+
+    def test_server_url_from_host_header_when_no_request_context(self):
+        r = launch_handler(self._event(
+            headers={'host': 'fallback.example.com'}, domain=None,
+        ))
+        src = self._decode_payload(r['headers']['Location'])
+        self.assertIn(
+            "const SERVER_URL = 'https://fallback.example.com';", src,
+        )
+
+    def test_auth_header_baked_when_token_set(self):
+        os.environ['AUTH_TOKEN'] = 'me:secret'
+        try:
+            r = launch_handler(self._event(headers=_basic_header('me:secret')))
+            self.assertEqual(r['statusCode'], 302)
+            src = self._decode_payload(r['headers']['Location'])
+            expected = 'Basic ' + base64.b64encode(b'me:secret').decode()
+            self.assertIn(f"const AUTH_HEADER = '{expected}';", src)
+        finally:
+            os.environ.pop('AUTH_TOKEN', None)
+
+    def test_auth_header_left_empty_when_token_unset(self):
+        # No AUTH_TOKEN → AUTH_HEADER literal stays as the empty default.
+        r = launch_handler(self._event())
+        src = self._decode_payload(r['headers']['Location'])
+        self.assertIn("const AUTH_HEADER = '';", src)
 
     def test_query_overrides_apply(self):
         r = launch_handler(self._event(qs={
