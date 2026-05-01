@@ -1,4 +1,4 @@
-beatwav @ git+ssh://git@github.com/jhw/beatwav.git@v0.2.2
+beatwav @ git+https://github.com/jhw/beatwav.git@v0.2.2
 boto3>=1.34
 jinja2>=3.1
 octapy @ git+https://github.com/jhw/octapy.git@v0.1.31
