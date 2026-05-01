@@ -34,12 +34,15 @@ SOURCE_GLOB = ['app', 'docker', 'requirements.txt']
 
 
 def run(cmd: list[str], *, cwd: pathlib.Path | None = None,
-        env: dict | None = None, capture: bool = False) -> str:
+        env: dict | None = None, capture: bool = False,
+        check: bool = True) -> str:
     print('+', ' '.join(cmd), file=sys.stderr)
     if capture:
-        out = subprocess.check_output(cmd, cwd=cwd, env=env, text=True)
-        return out
-    subprocess.check_call(cmd, cwd=cwd, env=env)
+        return subprocess.check_output(cmd, cwd=cwd, env=env, text=True)
+    if check:
+        subprocess.check_call(cmd, cwd=cwd, env=env)
+    else:
+        subprocess.call(cmd, cwd=cwd, env=env)
     return ''
 
 
@@ -48,6 +51,19 @@ def pulumi_output(stack_dir: pathlib.Path, stack: str, key: str) -> str:
         ['pulumi', 'stack', 'output', '--stack', stack, key, '--show-secrets'],
         cwd=stack_dir, capture=True,
     ).strip()
+
+
+def ensure_stack(stack_dir: pathlib.Path, stack: str) -> None:
+    """Idempotent `pulumi stack init`. Local-file backend stores state
+    in `<stack_dir>/.pulumi/`; the first run on a fresh checkout has
+    to create the stack before `pulumi up` will work."""
+    rc = subprocess.call(
+        ['pulumi', 'stack', 'select', stack, '--non-interactive'],
+        cwd=stack_dir,
+    )
+    if rc != 0:
+        run(['pulumi', 'stack', 'init', stack, '--non-interactive'],
+            cwd=stack_dir)
 
 
 def pulumi_up(stack_dir: pathlib.Path, stack: str) -> None:
@@ -147,7 +163,24 @@ def main() -> int:
     args = p.parse_args()
 
     stack = args.stage
+    region = os.environ.get('AWS_REGION', 'eu-west-1')
+    oneshot_s3_uri_env = os.environ.get(
+        'STRUDELBREAKS_ONESHOT_S3_URI', 's3://wol-samplebank/samples/'
+    )
+    domain_name_env = os.environ.get('STRUDELBREAKS_DOMAIN', '').strip()
+    hosted_zone_id_env = os.environ.get('STRUDELBREAKS_HOSTED_ZONE_ID', '').strip()
+    if bool(domain_name_env) != bool(hosted_zone_id_env):
+        sys.exit(
+            'STRUDELBREAKS_DOMAIN and STRUDELBREAKS_HOSTED_ZONE_ID must be '
+            'set together (or both unset).'
+        )
+
     print(f'== infra/pipeline ({stack}) ==', file=sys.stderr)
+    ensure_stack(PIPELINE_DIR, stack)
+    run(['pulumi', 'config', 'set', '--stack', stack, 'aws:region', region],
+        cwd=PIPELINE_DIR)
+    run(['pulumi', 'config', 'set', '--stack', stack, 'oneshot_s3_uri',
+         oneshot_s3_uri_env], cwd=PIPELINE_DIR)
     pulumi_up(PIPELINE_DIR, stack)
 
     artifacts_bucket = pulumi_output(PIPELINE_DIR, stack, 'artifacts_bucket')
@@ -194,12 +227,27 @@ def main() -> int:
     image_uri = f'{ecr_repo_url}@{digest}'
 
     print(f'== infra/app ({stack}) ==', file=sys.stderr)
+    ensure_stack(APP_DIR, stack)
+    run(['pulumi', 'config', 'set', '--stack', stack, 'aws:region', region],
+        cwd=APP_DIR)
     run(['pulumi', 'config', 'set', '--stack', stack, 'image_uri', image_uri],
         cwd=APP_DIR)
     run(['pulumi', 'config', 'set', '--stack', stack, 'lambda_role_arn',
          lambda_role_arn], cwd=APP_DIR)
     run(['pulumi', 'config', 'set', '--stack', stack, 'oneshot_s3_uri',
          oneshot_s3_uri], cwd=APP_DIR)
+    if domain_name_env and hosted_zone_id_env:
+        run(['pulumi', 'config', 'set', '--stack', stack, 'domain_name',
+             domain_name_env], cwd=APP_DIR)
+        run(['pulumi', 'config', 'set', '--stack', stack, 'hosted_zone_id',
+             hosted_zone_id_env], cwd=APP_DIR)
+    else:
+        # If the env vars get unset between deploys, drop the keys so
+        # the stack stops provisioning the cert/domain on the next up.
+        run(['pulumi', 'config', 'rm', '--stack', stack, 'domain_name'],
+            cwd=APP_DIR, check=False)
+        run(['pulumi', 'config', 'rm', '--stack', stack, 'hosted_zone_id'],
+            cwd=APP_DIR, check=False)
     auth = os.environ.get('AUTH_TOKEN')
     if auth:
         run(['pulumi', 'config', 'set', '--stack', stack, '--secret',
@@ -208,6 +256,13 @@ def main() -> int:
 
     api_endpoint = pulumi_output(APP_DIR, stack, 'api_endpoint')
     print(f'API endpoint: {api_endpoint}')
+    custom = subprocess.run(
+        ['pulumi', 'stack', 'output', '--stack', stack,
+         'custom_domain_url', '--show-secrets'],
+        cwd=APP_DIR, capture_output=True, text=True,
+    )
+    if custom.returncode == 0 and custom.stdout.strip():
+        print(f'Custom domain: {custom.stdout.strip()}')
     return 0
 
 
