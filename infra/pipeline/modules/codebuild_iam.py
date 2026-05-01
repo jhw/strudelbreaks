@@ -39,9 +39,16 @@ def create_codebuild_role(
         if oneshot_prefix else f'arn:aws:s3:::{oneshot_bucket}/*'
     )
 
+    # Path /app/ + DeveloperBoundary required by the wol-dev IAM
+    # contract — see lambda_iam.py for the same change.
+    account_id = aws.get_caller_identity().account_id
+    boundary_arn = f'arn:aws:iam::{account_id}:policy/DeveloperBoundary'
+
     role = aws.iam.Role(
         name,
         name=name,
+        path='/app/',
+        permissions_boundary=boundary_arn,
         assume_role_policy=json.dumps({
             'Version': '2012-10-17',
             'Statement': [{
@@ -50,6 +57,7 @@ def create_codebuild_role(
                 'Action': 'sts:AssumeRole',
             }],
         }),
+        opts=pulumi.ResourceOptions(delete_before_replace=True),
     )
 
     aws.iam.RolePolicy(

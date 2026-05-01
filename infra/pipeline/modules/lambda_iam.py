@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 
+import pulumi
 import pulumi_aws as aws
 
 
@@ -29,9 +30,20 @@ def create_lambda_role(*, name: str, oneshot_s3_uri: str) -> aws.iam.Role:
     bucket_arn = f'arn:aws:s3:::{bucket}'
     object_arn = f'arn:aws:s3:::{bucket}/{prefix}*' if prefix else f'arn:aws:s3:::{bucket}/*'
 
+    # Path /app/ + DeveloperBoundary are required by the wol-dev
+    # DeveloperAccess SSO role's IAM permissions. See
+    # ../gists/aws/4656a0014524403f11a291a05b677a65/AWS_SECURITY.md.
+    # `delete_before_replace=True` is needed because the role has an
+    # explicit name — without it pulumi would try to create the new
+    # role first and trip on the name conflict.
+    account_id = aws.get_caller_identity().account_id
+    boundary_arn = f'arn:aws:iam::{account_id}:policy/DeveloperBoundary'
+
     role = aws.iam.Role(
         name,
         name=name,
+        path='/app/',
+        permissions_boundary=boundary_arn,
         assume_role_policy=json.dumps({
             'Version': '2012-10-17',
             'Statement': [{
@@ -40,6 +52,7 @@ def create_lambda_role(*, name: str, oneshot_s3_uri: str) -> aws.iam.Role:
                 'Action': 'sts:AssumeRole',
             }],
         }),
+        opts=pulumi.ResourceOptions(delete_before_replace=True),
     )
 
     aws.iam.RolePolicyAttachment(
