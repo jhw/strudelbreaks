@@ -271,6 +271,15 @@ def main() -> int:
     if auth:
         run(['pulumi', 'config', 'set', '--stack', stack, '--secret',
              'auth_token', auth], cwd=APP_DIR)
+    slack_webhook_url = os.environ.get('SLACK_WEBHOOK_URL')
+    if slack_webhook_url:
+        run(['pulumi', 'config', 'set', '--stack', stack, '--secret',
+             'slack_webhook_url', slack_webhook_url], cwd=APP_DIR)
+    else:
+        # Drop the key when unset so a deploy with no webhook cleanly
+        # removes the env var on the notifier.
+        run(['pulumi', 'config', 'rm', '--stack', stack, 'slack_webhook_url'],
+            cwd=APP_DIR, check=False)
     pulumi_up(APP_DIR, stack)
 
     api_endpoint = pulumi_output(APP_DIR, stack, 'api_endpoint')

@@ -14,6 +14,12 @@ export PULUMI_BACKEND_URL="${PULUMI_BACKEND_URL:-file://.}"
 export PULUMI_CONFIG_PASSPHRASE="${PULUMI_CONFIG_PASSPHRASE:-}"
 export AUTH_TOKEN="${AUTH_TOKEN:-}"
 
+# Slack incoming-webhook URL the chatops-for-lambda error notifier
+# POSTs to. Leave unset to disable Slack notifications (the notifier
+# stays deployed but logs a warning + drops the message). Set in your
+# shell or in config/setenv.local.sh — never commit the URL.
+export SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}"
+
 # Custom domain wiring. Both must be set together, or both left
 # unset (the API publishes only the *.execute-api endpoint).
 #   strudelbeats.klingklangwol.com → wol-dev hosted zone
