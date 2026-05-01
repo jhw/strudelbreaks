@@ -157,7 +157,7 @@ class LaunchHandlerTest(unittest.TestCase):
         self.assertEqual(r['statusCode'], 302)
         src = self._decode_payload(r['headers']['Location'])
         self.assertIn("const gistUser = 'jhw';", src)
-        self.assertIn('const BPM = 128;', src)
+        self.assertIn('const BPM = 124;', src)
         self.assertIn('const SEED = 22682;', src)
         # SERVER_URL gets baked from requestContext.domainName even
         # when no override is supplied.

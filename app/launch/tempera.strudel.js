@@ -9,7 +9,7 @@ const gistUser = 'jhw';
 const gistId = 'b39b2cd8b216d2e219c0c932b76e3cf7';
 const gistUrl = 'https://gist.githubusercontent.com/' + gistUser + '/' + gistId + '/raw/strudel.json';
 
-const BPM = 128;
+const BPM = 124;
 const BEATS_PER_CYCLE = 4;
 const LOOP_CYCLES = 2;
 const N_SLICES = 16;
