@@ -23,3 +23,12 @@ export STRUDELBREAKS_HOSTED_ZONE_ID="${STRUDELBREAKS_HOSTED_ZONE_ID:-Z08818266BL
 
 # One-shot drum-sample bucket. Read by both stacks.
 export STRUDELBREAKS_ONESHOT_S3_URI="${STRUDELBREAKS_ONESHOT_S3_URI:-s3://wol-samplebank/samples/}"
+
+# Defaults the launch handler splices into tempera.strudel.js when it
+# serves GET /launch. Empty values fall through to the literals
+# committed in tempera.strudel.js. Override per-deploy if you want a
+# different default sample gist / BPM / seed without touching the file.
+export STRUDELBREAKS_LAUNCH_GIST_USER="${STRUDELBREAKS_LAUNCH_GIST_USER:-}"
+export STRUDELBREAKS_LAUNCH_GIST_ID="${STRUDELBREAKS_LAUNCH_GIST_ID:-}"
+export STRUDELBREAKS_LAUNCH_BPM="${STRUDELBREAKS_LAUNCH_BPM:-}"
+export STRUDELBREAKS_LAUNCH_SEED="${STRUDELBREAKS_LAUNCH_SEED:-}"

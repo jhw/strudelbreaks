@@ -57,6 +57,20 @@ if bool(domain_name) != bool(hosted_zone_id):
         '(or both omitted)'
     )
 
+# Per-environment defaults the launch handler bakes into
+# tempera.strudel.js when it serves /launch. All four are optional —
+# unset values fall through to whatever's in the committed file.
+launch_gist_user = config.get('launch_gist_user') or ''
+launch_gist_id = config.get('launch_gist_id') or ''
+launch_bpm = config.get('launch_bpm') or ''
+launch_seed = config.get('launch_seed') or ''
+
+# Origin allowlist for cross-origin fetches from tempera. The launch
+# route is a top-level GET (no CORS preflight), so this only really
+# gates the four /api/export/* POSTs — which are only ever called
+# from a tempera instance running on strudel.cc.
+ALLOWED_ORIGINS = ['https://strudel.cc']
+
 LOG_RETENTION_DAYS = 14
 TMP_DIR = '/tmp'
 
@@ -97,6 +111,15 @@ HANDLERS = [
         'cmd': 'app.api.launch.handler.handler',
         'memory': 256,
         'timeout': 10,
+        # Per-handler env merged on top of the base env every Lambda
+        # carries (AUTH_TOKEN, ONESHOT_S3_URI, STRUDELBREAKS_TMP).
+        # Empty values are dropped so we don't ship `LAUNCH_BPM=`.
+        'env': {
+            'LAUNCH_GIST_USER': launch_gist_user,
+            'LAUNCH_GIST_ID':   launch_gist_id,
+            'LAUNCH_BPM':       launch_bpm,
+            'LAUNCH_SEED':      launch_seed,
+        },
     },
 ]
 
@@ -106,10 +129,11 @@ api = aws.apigatewayv2.Api(
     name=f'{project}-{stack}',
     protocol_type='HTTP',
     cors_configuration={
-        # GET added so the launch redirect can be poked at via fetch
-        # from the browser console for smoke testing; harmless for the
-        # POST routes.
-        'allow_origins': ['*'],
+        # Only tempera (running on strudel.cc) calls the export POSTs
+        # cross-origin. /launch is a top-level GET so it never triggers
+        # a preflight; including GET here just lets dev tools poke at
+        # it from the browser console.
+        'allow_origins': ALLOWED_ORIGINS,
         'allow_methods': ['GET', 'POST', 'OPTIONS'],
         'allow_headers': ['Authorization', 'Content-Type'],
         'expose_headers': ['Content-Disposition'],
@@ -132,6 +156,7 @@ def _make_lambda(spec: dict) -> aws.lambda_.Function:
         name=f'/aws/lambda/{fn_name}',
         retention_in_days=LOG_RETENTION_DAYS,
     )
+    extra_env = {k: v for k, v in (spec.get('env') or {}).items() if v}
     fn = aws.lambda_.Function(
         fn_name,
         name=fn_name,
@@ -148,6 +173,7 @@ def _make_lambda(spec: dict) -> aws.lambda_.Function:
                 'ONESHOT_S3_URI': v['oneshot'],
                 'STRUDELBREAKS_TMP': TMP_DIR,
                 'AUTH_TOKEN': v['token'],
+                **extra_env,
             }),
         },
         opts=pulumi.ResourceOptions(depends_on=[log_group]),

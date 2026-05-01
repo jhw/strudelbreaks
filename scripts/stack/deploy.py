@@ -248,6 +248,25 @@ def main() -> int:
             cwd=APP_DIR, check=False)
         run(['pulumi', 'config', 'rm', '--stack', stack, 'hosted_zone_id'],
             cwd=APP_DIR, check=False)
+
+    # Per-environment defaults the launch handler bakes into
+    # tempera.strudel.js. Each one is `set` if present, `rm` if not —
+    # so unsetting an env var between deploys cleanly removes the
+    # corresponding Pulumi config entry on the next `up`.
+    launch_envs = [
+        ('STRUDELBREAKS_LAUNCH_GIST_USER', 'launch_gist_user'),
+        ('STRUDELBREAKS_LAUNCH_GIST_ID',   'launch_gist_id'),
+        ('STRUDELBREAKS_LAUNCH_BPM',       'launch_bpm'),
+        ('STRUDELBREAKS_LAUNCH_SEED',      'launch_seed'),
+    ]
+    for env_key, cfg_key in launch_envs:
+        v = os.environ.get(env_key, '').strip()
+        if v:
+            run(['pulumi', 'config', 'set', '--stack', stack, cfg_key, v],
+                cwd=APP_DIR)
+        else:
+            run(['pulumi', 'config', 'rm', '--stack', stack, cfg_key],
+                cwd=APP_DIR, check=False)
     auth = os.environ.get('AUTH_TOKEN')
     if auth:
         run(['pulumi', 'config', 'set', '--stack', stack, '--secret',

@@ -76,6 +76,11 @@ OT_PATTERN_STEPS = 16  # 1 bar at 1/16 per step — one Strudel cycle
 # exposes .send.
 T8_FX_LEVEL = 64
 
+# DELAY feedback (encoder B on the FX2 page; see octapy
+# `FX_PARAM_NAMES[FX2Type.DELAY]`). 32 = ¼ of the 0-127 range —
+# audible repeats without runaway tail.
+T8_DELAY_FEEDBACK = 32
+
 # Octatrack trig probability buckets (TrigCondition.PERCENT_*). The OT
 # can only express the discrete values listed below; arbitrary
 # probabilities snap to the nearest bucket. p == 1.0 leaves the
@@ -179,7 +184,8 @@ def configure_track_fx(part, n_ot_tracks):
     t8.fx1_type = FX1Type.CHORUS
     t8.fx1.mix = T8_FX_LEVEL    # CHORUS: wet/dry on .mix
     t8.fx2_type = FX2Type.DELAY
-    t8.fx2.send = T8_FX_LEVEL   # DELAY: wet level on .send (no .mix here)
+    t8.fx2.send = T8_FX_LEVEL          # DELAY: wet level on .send (no .mix here)
+    t8.fx2.feedback = T8_DELAY_FEEDBACK  # encoder B — see T8_DELAY_FEEDBACK
 
 
 def _resolve_stem_paths(*, gist_user, gist_id, names, target_bpm, stem_tracks):

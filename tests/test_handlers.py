@@ -1,4 +1,4 @@
-"""Tests for the four Lambda export handlers.
+"""Tests for the five Lambda handlers.
 
 We invoke each handler directly with an API-Gateway-shaped event dict
 — no FastAPI, no TestClient. The sample-source layer is stubbed
@@ -14,6 +14,7 @@ import os
 import unittest
 import zipfile
 
+from app.api.launch.handler import handler as launch_handler
 from app.api.ot_basic.handler import handler as ot_basic_handler
 from app.api.ot_doom.handler import handler as ot_doom_handler
 from app.api.strudel.handler import handler as strudel_handler
@@ -128,6 +129,83 @@ class AuthTest(unittest.TestCase):
             headers=_basic_header('u:p'),
         ))
         self.assertEqual(r['statusCode'], 200)
+
+
+class LaunchHandlerTest(unittest.TestCase):
+    """The launch handler is the only one that responds to GET, returns
+    a 302, reads the bundled tempera.strudel.js, and rewrites four
+    `const` literals from query string + env. Cover each rewrite path
+    + the auth gate."""
+
+    @staticmethod
+    def _event(qs=None, headers=None):
+        return {
+            'queryStringParameters': qs,
+            'headers': headers or {},
+        }
+
+    @staticmethod
+    def _decode_payload(redirect_url):
+        # `https://strudel.cc/#<base64>` → decoded JS source
+        prefix = 'https://strudel.cc/#'
+        assert redirect_url.startswith(prefix), redirect_url
+        return base64.b64decode(redirect_url[len(prefix):]).decode('utf-8')
+
+    def test_default_serves_committed_literals(self):
+        r = launch_handler(self._event())
+        self.assertEqual(r['statusCode'], 302)
+        src = self._decode_payload(r['headers']['Location'])
+        self.assertIn("const gistUser = 'jhw';", src)
+        self.assertIn('const BPM = 128;', src)
+        self.assertIn('const SEED = 22682;', src)
+
+    def test_query_overrides_apply(self):
+        r = launch_handler(self._event(qs={
+            'gistUser': 'someone', 'gistId': 'abc123', 'bpm': '140', 'seed': '7',
+        }))
+        self.assertEqual(r['statusCode'], 302)
+        src = self._decode_payload(r['headers']['Location'])
+        self.assertIn("const gistUser = 'someone';", src)
+        self.assertIn("const gistId = 'abc123';", src)
+        self.assertIn('const BPM = 140;', src)
+        self.assertIn('const SEED = 7;', src)
+
+    def test_env_defaults_apply_when_query_absent(self):
+        os.environ['LAUNCH_GIST_USER'] = 'envman'
+        os.environ['LAUNCH_BPM'] = '160'
+        try:
+            r = launch_handler(self._event())
+            src = self._decode_payload(r['headers']['Location'])
+            self.assertIn("const gistUser = 'envman';", src)
+            self.assertIn('const BPM = 160;', src)
+        finally:
+            os.environ.pop('LAUNCH_GIST_USER', None)
+            os.environ.pop('LAUNCH_BPM', None)
+
+    def test_query_wins_over_env(self):
+        os.environ['LAUNCH_BPM'] = '100'
+        try:
+            r = launch_handler(self._event(qs={'bpm': '170'}))
+            src = self._decode_payload(r['headers']['Location'])
+            self.assertIn('const BPM = 170;', src)
+        finally:
+            os.environ.pop('LAUNCH_BPM', None)
+
+    def test_invalid_query_returns_400(self):
+        r = launch_handler(self._event(qs={'gistUser': 'has spaces'}))
+        self.assertEqual(r['statusCode'], 400)
+
+    def test_auth_gate(self):
+        os.environ['AUTH_TOKEN'] = 'u:p'
+        try:
+            r = launch_handler(self._event())
+            self.assertEqual(r['statusCode'], 401)
+            self.assertEqual(r['headers']['WWW-Authenticate'], 'Basic')
+
+            r = launch_handler(self._event(headers=_basic_header('u:p')))
+            self.assertEqual(r['statusCode'], 302)
+        finally:
+            os.environ.pop('AUTH_TOKEN', None)
 
 
 if __name__ == '__main__':

@@ -123,6 +123,11 @@ FLEX_SLOT_LIMIT = 128         # OT project-wide flex pool.
 # exposes .send.
 T8_FX_LEVEL = 64
 
+# DELAY feedback (encoder B on the FX2 page; see octapy
+# `FX_PARAM_NAMES[FX2Type.DELAY]`). 32 = ¼ of the 0-127 range —
+# audible repeats without runaway tail.
+T8_DELAY_FEEDBACK = 32
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 OUTPUT_DIR = REPO_ROOT / 'tmp' / 'ot-doom'
 RENDER_DIR = REPO_ROOT / 'tmp' / 'ot-doom-render'
@@ -285,7 +290,8 @@ def _configure_part(part, default_packed_slot, n, n_ot_tracks):
     t8.fx1_type = FX1Type.CHORUS
     t8.fx1.mix = T8_FX_LEVEL    # CHORUS: wet/dry on .mix
     t8.fx2_type = FX2Type.DELAY
-    t8.fx2.send = T8_FX_LEVEL   # DELAY: wet level on .send (no .mix here)
+    t8.fx2.send = T8_FX_LEVEL          # DELAY: wet level on .send (no .mix here)
+    t8.fx2.feedback = T8_DELAY_FEEDBACK  # encoder B — see T8_DELAY_FEEDBACK
 
 
 def render_bank(
