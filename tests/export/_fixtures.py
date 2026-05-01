@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import importlib
 import json
-import math
 import pathlib
-import struct
 import sys
 import tempfile
 import wave
@@ -38,16 +36,27 @@ def load_render_module(target: str):
 
 
 def write_sine_wav(path: pathlib.Path, freq: float, duration_s: float) -> None:
-    """Synthesise a mono 16-bit 44.1 kHz sine WAV at `path`."""
+    """Write a silent mono 16-bit 44.1 kHz WAV of `duration_s` at `path`.
+
+    The name is historical — fixture callers used to want frequency
+    differentiation. They don't: the OT slot manager dedupes by path,
+    not by audio bytes, and the per-track helper already gives every
+    `(name, track)` pair its own filename. So the fastest correct
+    fixture is an all-zero buffer — sub-ms per WAV vs. tens of ms
+    for the per-frame sine loop.
+
+    `freq` is kept in the signature for callers that pass it; it's
+    ignored.
+    """
+    del freq  # unused — see docstring
     path.parent.mkdir(parents=True, exist_ok=True)
     n_frames = int(duration_s * SAMPLE_RATE)
+    silence = b'\x00\x00' * n_frames
     with wave.open(str(path), 'wb') as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(SAMPLE_RATE)
-        for i in range(n_frames):
-            v = int(0.5 * 32767 * math.sin(2 * math.pi * freq * i / SAMPLE_RATE))
-            w.writeframes(struct.pack('<h', v))
+        w.writeframes(silence)
 
 
 def make_break_wavs(
