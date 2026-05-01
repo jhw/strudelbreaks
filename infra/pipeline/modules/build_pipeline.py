@@ -16,6 +16,7 @@ def create_codebuild_project(
     role_arn: pulumi.Output[str],
     artifacts_bucket: pulumi.Output[str],
     ecr_repo: aws.ecr.Repository,
+    oneshot_s3_uri: str,
 ) -> aws.codebuild.Project:
     region = aws.get_region().name
 
@@ -41,6 +42,10 @@ def create_codebuild_project(
                     'value': ecr_repo.repository_url.apply(lambda u: u.split('/', 1)[0]),
                 },
                 {'name': 'ECR_REPO_NAME', 'value': ecr_repo.name},
+                # Buildspec syncs from this URI into ./oneshots/ pre-build
+                # so the image bakes the one-shots and the audio Lambdas
+                # skip the cold-start S3 sync.
+                {'name': 'ONESHOT_S3_URI', 'value': oneshot_s3_uri},
             ],
         },
         logs_config={

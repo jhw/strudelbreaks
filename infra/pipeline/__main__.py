@@ -36,6 +36,7 @@ cb_role = codebuild_iam.create_codebuild_role(
     name=f'{project_name}-{stack}-codebuild',
     artifacts_bucket_arn=bucket.arn,
     ecr_repo_arn=repo.arn,
+    oneshot_s3_uri=oneshot_s3_uri,
 )
 
 lambda_role = lambda_iam.create_lambda_role(
@@ -48,6 +49,7 @@ project = build_pipeline.create_codebuild_project(
     role_arn=cb_role.arn,
     artifacts_bucket=bucket.bucket,
     ecr_repo=repo,
+    oneshot_s3_uri=oneshot_s3_uri,
 )
 
 pulumi.export('ecr_repo_url', repo.repository_url)

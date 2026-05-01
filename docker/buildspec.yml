@@ -22,6 +22,14 @@ phases:
       # SOURCE_VERSION is empty for S3-source builds, so we don't even
       # bother trying it as a fallback.
       - IMAGE_TAG="${CODEBUILD_BUILD_ID##*:}"
+      # Mirror the one-shot drum samples into the build context so the
+      # Dockerfile can COPY them into /opt/oneshots in the image. With
+      # them baked in, the audio Lambdas skip the boto3 sync that
+      # otherwise blows the API Gateway 30s integration timeout on
+      # every cold start. --delete keeps the layer cache clean when
+      # samples get rotated upstream.
+      - echo "Mirroring oneshots from $ONESHOT_S3_URI into ./oneshots/ ..."
+      - aws s3 sync "$ONESHOT_S3_URI" ./oneshots/ --delete --no-progress
   build:
     commands:
       - echo "Building image $IMAGE_REPO:$IMAGE_TAG ..."

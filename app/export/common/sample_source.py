@@ -61,6 +61,13 @@ DEFAULT_ONESHOT_S3_URI = 's3://wol-samplebank/samples/'
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
+# When the image was built with oneshots baked in (via
+# docker/buildspec.yml's `aws s3 sync` + Dockerfile `COPY`), the
+# samples land here. The Lambda runtime mounts /opt read-only — exactly
+# what we want for an immutable cache. Local dev that didn't run the
+# bake step still works via the runtime boto3 sync below.
+BAKED_ONESHOTS = pathlib.Path('/opt/oneshots')
+
 
 def _tmp_root() -> pathlib.Path:
     """Resolve the cache root: `STRUDELBREAKS_TMP` if set, else the
@@ -79,6 +86,19 @@ def _oneshot_s3_uri() -> str:
 
 def _oneshot_cache() -> pathlib.Path:
     return _tmp_root() / 'oneshots'
+
+
+def _baked_oneshots() -> pathlib.Path | None:
+    """Return BAKED_ONESHOTS if the image bundled them, else None.
+    `iterdir()` will raise if the dir doesn't exist; the existence
+    check up front avoids that and keeps the fallback path clean."""
+    if BAKED_ONESHOTS.is_dir():
+        try:
+            next(BAKED_ONESHOTS.iterdir())
+            return BAKED_ONESHOTS
+        except StopIteration:
+            return None
+    return None
 
 
 def _samples_cache() -> pathlib.Path:
@@ -153,9 +173,20 @@ def _parse_s3_uri(uri: str) -> Tuple[str, str]:
 
 
 def ensure_oneshots_synced(verbose: bool = False) -> pathlib.Path:
-    """If the one-shot cache is missing or empty, mirror the configured
-    S3 bucket into it via boto3 (no `aws` CLI required). Returns the
-    cache path. Raises if boto3 / AWS credentials aren't available."""
+    """Return a populated one-shot directory.
+
+    Preference order:
+      1. `/opt/oneshots/` baked into the container image at build time
+         (Lambda fast path — no I/O on cold start).
+      2. `<tmp>/oneshots/` if it's already populated (local dev cache
+         from a prior run).
+      3. Mirror the configured S3 bucket into `<tmp>/oneshots/` via
+         boto3. Raises if boto3 / AWS credentials aren't available.
+    """
+    baked = _baked_oneshots()
+    if baked is not None:
+        return baked
+
     cache = _oneshot_cache()
     cache.mkdir(parents=True, exist_ok=True)
     if any(cache.iterdir()):

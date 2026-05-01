@@ -3,6 +3,10 @@
 Grants:
   - read on the artifacts bucket (source.zip + markers)
   - push to the ECR repo we own
+  - read on the configured one-shot bucket prefix (the buildspec
+    `aws s3 sync`s the oneshots into the build context so they get
+    baked into the image at /opt/oneshots, eliminating the cold-start
+    sync on the audio Lambdas)
   - the standard CloudWatch log permissions
 """
 from __future__ import annotations
@@ -13,12 +17,28 @@ import pulumi
 import pulumi_aws as aws
 
 
+def _parse_s3_uri(uri: str) -> tuple[str, str]:
+    if not uri.startswith('s3://'):
+        raise ValueError(f'expected s3:// URI, got {uri!r}')
+    rest = uri[len('s3://'):]
+    bucket, _, prefix = rest.partition('/')
+    return bucket, prefix
+
+
 def create_codebuild_role(
     *,
     name: str,
     artifacts_bucket_arn: pulumi.Output[str],
     ecr_repo_arn: pulumi.Output[str],
+    oneshot_s3_uri: str,
 ) -> aws.iam.Role:
+    oneshot_bucket, oneshot_prefix = _parse_s3_uri(oneshot_s3_uri)
+    oneshot_bucket_arn = f'arn:aws:s3:::{oneshot_bucket}'
+    oneshot_object_arn = (
+        f'arn:aws:s3:::{oneshot_bucket}/{oneshot_prefix}*'
+        if oneshot_prefix else f'arn:aws:s3:::{oneshot_bucket}/*'
+    )
+
     role = aws.iam.Role(
         name,
         name=name,
@@ -62,6 +82,20 @@ def create_codebuild_role(
                         a['artifacts_bucket_arn'],
                         f"{a['artifacts_bucket_arn']}/*",
                     ],
+                },
+                # Same prefix-scoped read as the Lambda role: the
+                # buildspec mirrors this prefix into the image.
+                {
+                    'Effect': 'Allow',
+                    'Action': ['s3:ListBucket'],
+                    'Resource': oneshot_bucket_arn,
+                    **({'Condition': {'StringLike': {'s3:prefix': [f'{oneshot_prefix}*']}}}
+                       if oneshot_prefix else {}),
+                },
+                {
+                    'Effect': 'Allow',
+                    'Action': ['s3:GetObject'],
+                    'Resource': oneshot_object_arn,
                 },
                 {
                     'Effect': 'Allow',
