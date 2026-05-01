@@ -73,10 +73,17 @@ def pulumi_up(stack_dir: pathlib.Path, stack: str) -> None:
     )
 
 
-def hash_source() -> str:
-    """SHA-256 over every file under SOURCE_GLOB. Order-stable so the
-    same content produces the same hash regardless of how os.walk
-    happens to traverse on a given run."""
+def hash_source(oneshot_s3_uri: str) -> str:
+    """SHA-256 over every file under SOURCE_GLOB *plus* the current
+    state of the one-shot bucket (key + ETag for every object).
+
+    Order-stable: same content → same hash regardless of how os.walk
+    happens to traverse, and we sort objects by key. ETag is the MD5
+    of the object content for non-multipart uploads (which one-shots
+    are), so any add / remove / replace in the bucket flips the hash
+    → CodeBuild auto-rebuilds, picking up the fresh oneshots in the
+    Dockerfile's COPY step.
+    """
     h = hashlib.sha256()
     for root in SOURCE_GLOB:
         base = REPO_ROOT / root
@@ -90,7 +97,35 @@ def hash_source() -> str:
             h.update(b'\0')
             h.update(p.read_bytes())
             h.update(b'\0')
+    h.update(b'oneshots:')
+    h.update(oneshot_s3_uri.encode())
+    h.update(b'\0')
+    for key, etag in _list_oneshots(oneshot_s3_uri):
+        h.update(key.encode())
+        h.update(b'\0')
+        h.update(etag.encode())
+        h.update(b'\0')
     return h.hexdigest()
+
+
+def _list_oneshots(s3_uri: str) -> list[tuple[str, str]]:
+    """Return (key, etag) pairs for every object under the one-shot
+    URI, sorted by key. ListObjectsV2 already returns lex-sorted keys
+    but we sort defensively across pages."""
+    import boto3
+    if not s3_uri.startswith('s3://'):
+        raise ValueError(f'expected s3:// URI, got {s3_uri!r}')
+    rest = s3_uri[len('s3://'):]
+    bucket, _, prefix = rest.partition('/')
+    s3 = boto3.client('s3')
+    items: list[tuple[str, str]] = []
+    for page in s3.get_paginator('list_objects_v2').paginate(
+        Bucket=bucket, Prefix=prefix,
+    ):
+        for obj in page.get('Contents') or []:
+            items.append((obj['Key'], obj['ETag']))
+    items.sort()
+    return items
 
 
 def build_source_zip() -> bytes:
@@ -190,7 +225,7 @@ def main() -> int:
     oneshot_s3_uri = pulumi_output(PIPELINE_DIR, stack, 'oneshot_s3_uri')
 
     digest_marker_key = f'markers/{stack}/last-build.json'
-    src_hash = hash_source()
+    src_hash = hash_source(oneshot_s3_uri_env)
     print(f'source hash: {src_hash}', file=sys.stderr)
 
     cached = s3_get_text(artifacts_bucket, digest_marker_key)
