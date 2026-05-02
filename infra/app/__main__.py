@@ -52,6 +52,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 image_uri = config.require('image_uri')
 lambda_role_arn = config.require('lambda_role_arn')
 oneshot_s3_uri = config.require('oneshot_s3_uri')
+artifacts_bucket = config.require('artifacts_bucket')
 auth_token = config.require_secret('auth_token')
 slack_webhook_url = config.get_secret('slack_webhook_url')
 
@@ -117,11 +118,16 @@ HANDLERS = [
         # Per-handler env merged on top of the base env every Lambda
         # carries (AUTH_TOKEN, ONESHOT_S3_URI, STRUDELBREAKS_TMP).
         # Empty values are dropped so we don't ship `LAUNCH_BPM=`.
+        # LAUNCH_DEFAULTS_S3_URI points at the single S3 key the
+        # handler reads/writes to remember query-string args across
+        # visits — see app/api/launch/handler.py.
         'env': {
             'LAUNCH_GIST_USER': launch_gist_user,
             'LAUNCH_GIST_ID':   launch_gist_id,
             'LAUNCH_BPM':       launch_bpm,
             'LAUNCH_SEED':      launch_seed,
+            'LAUNCH_DEFAULTS_S3_URI':
+                f's3://{artifacts_bucket}/launch-defaults/global.json',
         },
     },
 ]

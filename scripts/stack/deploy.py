@@ -271,6 +271,8 @@ def main() -> int:
          lambda_role_arn], cwd=APP_DIR)
     run(['pulumi', 'config', 'set', '--stack', stack, 'oneshot_s3_uri',
          oneshot_s3_uri], cwd=APP_DIR)
+    run(['pulumi', 'config', 'set', '--stack', stack, 'artifacts_bucket',
+         artifacts_bucket], cwd=APP_DIR)
     if domain_name_env and hosted_zone_id_env:
         run(['pulumi', 'config', 'set', '--stack', stack, 'domain_name',
              domain_name_env], cwd=APP_DIR)

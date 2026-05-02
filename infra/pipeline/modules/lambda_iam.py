@@ -25,7 +25,14 @@ def _parse_s3_uri(uri: str) -> tuple[str, str]:
     return bucket, prefix
 
 
-def create_lambda_role(*, name: str, oneshot_s3_uri: str) -> aws.iam.Role:
+# Object key the launch handler reads/writes. Limited to a single
+# fixed key so the policy below grants the smallest possible blast
+# radius — get/put on this one key, nothing else in the bucket.
+LAUNCH_DEFAULTS_KEY = 'launch-defaults/global.json'
+
+
+def create_lambda_role(*, name: str, oneshot_s3_uri: str,
+                       artifacts_bucket: pulumi.Input[str]) -> aws.iam.Role:
     bucket, prefix = _parse_s3_uri(oneshot_s3_uri)
     bucket_arn = f'arn:aws:s3:::{bucket}'
     object_arn = f'arn:aws:s3:::{bucket}/{prefix}*' if prefix else f'arn:aws:s3:::{bucket}/*'
@@ -61,25 +68,39 @@ def create_lambda_role(*, name: str, oneshot_s3_uri: str) -> aws.iam.Role:
         policy_arn='arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole',
     )
 
+    # The role grants read on the one-shot bucket (sample fetches) +
+    # read/write on a single key in the artifacts bucket (launch
+    # defaults persisted across visits — see app/api/launch/handler.py).
+    # Pulumi.Output.all is needed because `artifacts_bucket` is an
+    # Output[str]; the resulting policy JSON has the bucket name
+    # interpolated at deploy time.
     aws.iam.RolePolicy(
         f'{name}-s3',
         role=role.id,
-        policy=json.dumps({
-            'Version': '2012-10-17',
-            'Statement': [
-                {
-                    'Effect': 'Allow',
-                    'Action': ['s3:ListBucket'],
-                    'Resource': bucket_arn,
-                    **({'Condition': {'StringLike': {'s3:prefix': [f'{prefix}*']}}}
-                       if prefix else {}),
-                },
-                {
-                    'Effect': 'Allow',
-                    'Action': ['s3:GetObject'],
-                    'Resource': object_arn,
-                },
-            ],
-        }),
+        policy=pulumi.Output.from_input(artifacts_bucket).apply(
+            lambda artifacts_name: json.dumps({
+                'Version': '2012-10-17',
+                'Statement': [
+                    {
+                        'Effect': 'Allow',
+                        'Action': ['s3:ListBucket'],
+                        'Resource': bucket_arn,
+                        **({'Condition': {'StringLike': {'s3:prefix': [f'{prefix}*']}}}
+                           if prefix else {}),
+                    },
+                    {
+                        'Effect': 'Allow',
+                        'Action': ['s3:GetObject'],
+                        'Resource': object_arn,
+                    },
+                    {
+                        'Effect': 'Allow',
+                        'Action': ['s3:GetObject', 's3:PutObject'],
+                        'Resource':
+                            f'arn:aws:s3:::{artifacts_name}/{LAUNCH_DEFAULTS_KEY}',
+                    },
+                ],
+            })
+        ),
     )
     return role

@@ -264,5 +264,165 @@ class LaunchHandlerTest(unittest.TestCase):
             os.environ.pop('AUTH_TOKEN', None)
 
 
+class LaunchStoredDefaultsTest(unittest.TestCase):
+    """`/launch` persists validated query-string args to a single S3
+    key and reads them back on subsequent visits when the query
+    string is empty. The S3 client is patched per-test so nothing
+    reaches AWS."""
+
+    URI = 's3://test-artifacts/launch-defaults/global.json'
+
+    def setUp(self):
+        os.environ['LAUNCH_DEFAULTS_S3_URI'] = self.URI
+        # Backing store the per-test fake s3 client reads/writes.
+        self.store: dict = {}
+        self._patch_boto3()
+
+    def tearDown(self):
+        os.environ.pop('LAUNCH_DEFAULTS_S3_URI', None)
+        self._unpatch_boto3()
+
+    def _patch_boto3(self):
+        # Inject a fake boto3 module the handler picks up via its
+        # deferred `import boto3`. Behaves enough like the real
+        # client to drive the get/put paths.
+        import sys
+        import types
+
+        store = self.store
+
+        class _NoSuchKey(Exception):
+            response = {'Error': {'Code': 'NoSuchKey'}}
+
+        class _FakeClient:
+            def get_object(self, *, Bucket, Key):
+                if (Bucket, Key) not in store:
+                    raise _NoSuchKey()
+                payload = store[(Bucket, Key)]
+                return {'Body': type('B', (), {'read': lambda _self: payload})()}
+
+            def put_object(self, *, Bucket, Key, Body, ContentType=None):
+                store[(Bucket, Key)] = Body
+
+        fake_boto3 = types.ModuleType('boto3')
+        fake_boto3.client = lambda name: _FakeClient()
+        fake_botocore = types.ModuleType('botocore')
+        fake_exceptions = types.ModuleType('botocore.exceptions')
+        fake_exceptions.ClientError = _NoSuchKey
+        fake_botocore.exceptions = fake_exceptions
+
+        self._saved = {
+            'boto3': sys.modules.get('boto3'),
+            'botocore': sys.modules.get('botocore'),
+            'botocore.exceptions': sys.modules.get('botocore.exceptions'),
+        }
+        sys.modules['boto3'] = fake_boto3
+        sys.modules['botocore'] = fake_botocore
+        sys.modules['botocore.exceptions'] = fake_exceptions
+
+    def _unpatch_boto3(self):
+        import sys
+        for name, mod in self._saved.items():
+            if mod is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = mod
+
+    @staticmethod
+    def _event(qs=None):
+        return {
+            'queryStringParameters': qs,
+            'headers': {},
+            'requestContext': {'domainName': 'strudelbeats.example.com'},
+        }
+
+    @staticmethod
+    def _decode_payload(redirect_url):
+        prefix = 'https://strudel.cc/#'
+        return base64.b64decode(redirect_url[len(prefix):]).decode('utf-8')
+
+    def test_qs_values_persist_to_s3(self):
+        # First call with a qs: validated values land in the store.
+        r = launch_handler(self._event(qs={
+            'gistUser': 'alice', 'gistId': 'feed', 'bpm': '140', 'seed': '99',
+        }))
+        self.assertEqual(r['statusCode'], 302)
+        self.assertEqual(len(self.store), 1)
+        ((bucket, key), body), = self.store.items()
+        self.assertEqual(bucket, 'test-artifacts')
+        self.assertEqual(key, 'launch-defaults/global.json')
+        self.assertEqual(json.loads(body), {
+            'gistUser': 'alice', 'gistId': 'feed', 'bpm': '140', 'seed': '99',
+        })
+
+    def test_no_qs_uses_stored_defaults(self):
+        # Pre-seed the store as if a previous visit had supplied values.
+        self.store[('test-artifacts', 'launch-defaults/global.json')] = json.dumps({
+            'gistUser': 'persisted', 'gistId': 'cafef00d',
+            'bpm': '155', 'seed': '7',
+        }).encode()
+        r = launch_handler(self._event())
+        self.assertEqual(r['statusCode'], 302)
+        src = self._decode_payload(r['headers']['Location'])
+        self.assertIn("const gistUser = 'persisted';", src)
+        self.assertIn("const gistId = 'cafef00d';", src)
+        self.assertIn('const BPM = 155;', src)
+        self.assertIn('const SEED = 7;', src)
+
+    def test_qs_wins_over_stored_and_persists(self):
+        # Stored has bpm=100; qs supplies bpm=170. The redirect uses
+        # 170 *and* the new bpm overwrites the stored value.
+        self.store[('test-artifacts', 'launch-defaults/global.json')] = json.dumps({
+            'gistUser': 'old', 'bpm': '100',
+        }).encode()
+        r = launch_handler(self._event(qs={'bpm': '170'}))
+        src = self._decode_payload(r['headers']['Location'])
+        self.assertIn('const BPM = 170;', src)
+        # Stored gistUser stays — partial overrides accumulate.
+        self.assertIn("const gistUser = 'old';", src)
+        body = self.store[('test-artifacts', 'launch-defaults/global.json')]
+        self.assertEqual(json.loads(body), {'gistUser': 'old', 'bpm': '170'})
+
+    def test_stored_wins_over_env(self):
+        # Resolution order: qs > stored > env. With no qs, stored beats env.
+        self.store[('test-artifacts', 'launch-defaults/global.json')] = json.dumps({
+            'bpm': '155',
+        }).encode()
+        os.environ['LAUNCH_BPM'] = '100'
+        try:
+            r = launch_handler(self._event())
+            src = self._decode_payload(r['headers']['Location'])
+            self.assertIn('const BPM = 155;', src)
+        finally:
+            os.environ.pop('LAUNCH_BPM', None)
+
+    def test_env_used_when_no_qs_and_no_stored(self):
+        os.environ['LAUNCH_BPM'] = '160'
+        try:
+            r = launch_handler(self._event())
+            src = self._decode_payload(r['headers']['Location'])
+            self.assertIn('const BPM = 160;', src)
+            # No qs → nothing persisted (env defaults stay out of the
+            # stored blob so they're easy to change centrally).
+            self.assertEqual(self.store, {})
+        finally:
+            os.environ.pop('LAUNCH_BPM', None)
+
+    def test_invalid_qs_does_not_persist(self):
+        # qs validation runs before persistence; a 400 must not write.
+        r = launch_handler(self._event(qs={'gistUser': 'has spaces'}))
+        self.assertEqual(r['statusCode'], 400)
+        self.assertEqual(self.store, {})
+
+    def test_no_uri_skips_s3_entirely(self):
+        # If LAUNCH_DEFAULTS_S3_URI is unset (e.g. local dev / tests
+        # without infra) the handler must work as if persistence
+        # didn't exist — no read attempts, no write attempts.
+        os.environ.pop('LAUNCH_DEFAULTS_S3_URI', None)
+        r = launch_handler(self._event(qs={'bpm': '140'}))
+        self.assertEqual(r['statusCode'], 302)
+        self.assertEqual(self.store, {})
+
+
 if __name__ == '__main__':
     unittest.main()
