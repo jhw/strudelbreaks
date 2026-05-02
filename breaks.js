@@ -547,6 +547,34 @@
     return { element: menu, close };
   }
 
+  // Persistent status line — like createCornerPanel, but with a
+  // built-in show/hide for transient operation status. Intended for
+  // long-running ops (export round-trip to the server) where the user
+  // needs to see "doing X" until the response lands. Unlike notify()
+  // patterns elsewhere, this panel does NOT auto-dismiss: the caller
+  // owns the lifecycle via setText / clear, so the message disappears
+  // exactly when the work completes (success or failure).
+  function createStatusPanel({ corner, id, style = '', stack } = {}) {
+    const panel = createCornerPanel({
+      corner: corner || 'bottom-left',
+      id: id || 'status',
+      style: 'min-width:200px;max-width:480px' + (style ? ';' + style : ''),
+      stack,
+    });
+    panel.element.style.display = 'none';
+    return {
+      element: panel.element,
+      setText(text) {
+        panel.setText(text);
+        panel.element.style.display = '';
+      },
+      clear() {
+        panel.setText('');
+        panel.element.style.display = 'none';
+      },
+    };
+  }
+
   // Remove every DOM node the library has ever attached. Templates
   // should call this once after loading StrudelBreaks, before building
   // fresh widgets — otherwise panels from a previously-loaded template
@@ -630,7 +658,7 @@
     mini:  { parseBreak, parsePattern, formatBreak, formatPattern },
     util:  { meanIndex, thinByUniforms },
     hex:   { hex2, hexPad, arrayHex },
-    ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createFormBar, createSliderRow, createSliderPanel, createToggleSwitch, createActionMenu, resetUI },
+    ui:    { createCornerPanel, createButton, createIconButton, createDeleteIcon, createButtonBar, createFormBar, createSliderRow, createSliderPanel, createToggleSwitch, createActionMenu, createStatusPanel, resetUI },
     store: { createPersistedStore, downloadBlob },
   };
 });

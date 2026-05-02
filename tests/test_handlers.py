@@ -78,6 +78,29 @@ class OtBasicHandlerTest(unittest.TestCase):
             with zipfile.ZipFile(io.BytesIO(data)) as zf:
                 self.assertTrue(any(n.endswith('.work') for n in zf.namelist()))
 
+    def test_accepts_flatten_and_neighbour_flags(self):
+        with WorkDir() as wd:
+            paths = make_per_track_break_wavs(
+                wd.samples, ['kk'], tracks=('kick', 'snare', 'hat'),
+                bpm=120, steps=32,
+            )
+            wd.stub_sources(paths)
+            payload = make_export([[
+                make_capture_cell(['kk'], [0, 1, 2, 3, 4, 5, 6, 7]),
+            ]])
+            r = ot_basic_handler(_event({
+                'payload': payload, 'name': 'OTB2',
+                'flatten': True, 'neighbour': True,
+            }))
+            self.assertEqual(r['statusCode'], 200, r.get('body'))
+
+    def test_rejects_non_bool_flatten(self):
+        r = ot_basic_handler(_event({
+            'payload': {}, 'name': 'X', 'flatten': 'yes',
+        }))
+        self.assertEqual(r['statusCode'], 400)
+        self.assertIn('flatten', r['body'])
+
 
 class TorsoS4HandlerTest(unittest.TestCase):
     def test_returns_zip(self):

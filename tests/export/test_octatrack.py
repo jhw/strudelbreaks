@@ -254,5 +254,150 @@ class OctatrackRoundtripTest(unittest.TestCase):
                 render.render(wd.export_path, 'OOR', probability=1.5)
 
 
+class OctatrackNeighbourTest(unittest.TestCase):
+    """neighbour=True: flex tracks shift to T1/T3/T5; T2/T4/T6 are
+    neighbour machines with FILTER + DELAY; T8 drops the delay and
+    keeps just the spatializer."""
+
+    TRACKS = ('kick', 'snare', 'hat')
+
+    def _render_neighbour(self, *, split_stems=True):
+        render = load_render_module('octatrack/ot-basic')
+        wd = WorkDir().__enter__()
+        try:
+            if split_stems:
+                paths = make_per_track_break_wavs(
+                    wd.samples, ['kk'], tracks=self.TRACKS,
+                    bpm=120, steps=32,
+                )
+            else:
+                paths = make_break_wavs(wd.samples, ['kk'], bpm=120, steps=32)
+            wd.stub_sources(paths)
+            payload = make_export([[
+                make_capture_cell(['kk'], [0, 1, 2, 3, 4, 5, 6, 7]),
+            ]])
+            wd.write_export(payload)
+            render.OUTPUT_DIR = wd.root / 'out'
+            zip_path = render.render(
+                wd.export_path, 'OTNB',
+                split_stems=split_stems, neighbour=True,
+            )
+            return zip_path, wd
+        except Exception:
+            wd.__exit__(None, None, None)
+            raise
+
+    def test_split_neighbour_layout(self):
+        from octapy.api.enums import MachineType
+        zip_path, wd = self._render_neighbour(split_stems=True)
+        try:
+            project = Project.from_zip(zip_path)
+            part = project.bank(1).part(1)
+
+            # Flex tracks at T1, T3, T5 — DJ_EQ + COMPRESSOR each.
+            for track_num in (1, 3, 5):
+                t = part.audio_track(track_num)
+                self.assertEqual(int(t.machine_type), int(MachineType.FLEX),
+                                 f'T{track_num} should be FLEX')
+                self.assertEqual(t.fx1_type, FX1Type.DJ_EQ)
+                self.assertEqual(t.fx2_type, FX2Type.COMPRESSOR)
+
+            # Neighbours at T2, T4, T6 — FILTER + DELAY each.
+            for nb_num in (2, 4, 6):
+                nb = part.audio_track(nb_num)
+                self.assertEqual(int(nb.machine_type), int(MachineType.NEIGHBOR),
+                                 f'T{nb_num} should be NEIGHBOR')
+                self.assertEqual(nb.fx1_type, FX1Type.FILTER)
+                self.assertEqual(nb.fx2_type, FX2Type.DELAY)
+
+            # T8 keeps just the spatializer; the delay moved to the
+            # neighbour tracks.
+            t8 = part.audio_track(8)
+            self.assertEqual(t8.fx1_type, FX1Type.SPATIALIZER)
+            self.assertEqual(t8.fx2_type, FX2Type.OFF)
+
+            # Pattern trigs land on the flex tracks (T1/T3/T5), not
+            # T2/T3/T4 like the legacy layout.
+            pattern = project.bank(1).pattern(1)
+            for track_num in (1, 3, 5):
+                self.assertEqual(
+                    len(pattern.audio_track(track_num).active_steps), 8,
+                )
+            for nb_num in (2, 4, 6):
+                self.assertEqual(
+                    pattern.audio_track(nb_num).active_steps, [],
+                    f'neighbour T{nb_num} must have no trigs',
+                )
+        finally:
+            wd.__exit__(None, None, None)
+
+    def test_mixed_neighbour_layout(self):
+        from octapy.api.enums import MachineType
+        zip_path, wd = self._render_neighbour(split_stems=False)
+        try:
+            project = Project.from_zip(zip_path)
+            part = project.bank(1).part(1)
+            # Flex on T1 only, neighbour on T2.
+            self.assertEqual(int(part.audio_track(1).machine_type),
+                             int(MachineType.FLEX))
+            self.assertEqual(int(part.audio_track(2).machine_type),
+                             int(MachineType.NEIGHBOR))
+            self.assertEqual(part.audio_track(2).fx1_type, FX1Type.FILTER)
+            self.assertEqual(part.audio_track(2).fx2_type, FX2Type.DELAY)
+            self.assertEqual(part.audio_track(8).fx1_type, FX1Type.SPATIALIZER)
+        finally:
+            wd.__exit__(None, None, None)
+
+
+class OctatrackFlattenTest(unittest.TestCase):
+    """flatten=True collapses banks-of-cells into a flat cell list,
+    then re-banks every 16 cells into a fresh bank — wraps from
+    bank 1 → bank 2 etc."""
+
+    TRACKS = ('kick', 'snare', 'hat')
+
+    def test_flatten_repacks_18_cells_across_two_banks(self):
+        render = load_render_module('octatrack/ot-basic')
+        with WorkDir() as wd:
+            paths = make_per_track_break_wavs(
+                wd.samples, ['kk'], tracks=self.TRACKS,
+                bpm=120, steps=32,
+            )
+            wd.stub_sources(paths)
+            # Spread 18 cells across 4 input rows of varying length.
+            # Total must wrap into bank 1 (16 patterns) + bank 2 (2).
+            cell = make_capture_cell(['kk'], [0, 1, 2, 3, 4, 5, 6, 7])
+            payload = make_export([
+                [cell] * 5, [cell] * 6, [cell] * 4, [cell] * 3,
+            ])
+            wd.write_export(payload)
+            render.OUTPUT_DIR = wd.root / 'out'
+            zip_path = render.render(
+                wd.export_path, 'OTFLAT', flatten=True,
+            )
+            project = Project.from_zip(zip_path)
+
+            # Bank 1 patterns 1..16 should all have trigs (16 patterns).
+            for pat_num in range(1, 17):
+                self.assertEqual(
+                    len(project.bank(1).pattern(pat_num).audio_track(1).active_steps),
+                    8,
+                    f'bank 1 pattern {pat_num} should be populated',
+                )
+            # Bank 2 should have only patterns 1 and 2 populated.
+            self.assertEqual(
+                len(project.bank(2).pattern(1).audio_track(1).active_steps),
+                8,
+            )
+            self.assertEqual(
+                len(project.bank(2).pattern(2).audio_track(1).active_steps),
+                8,
+            )
+            self.assertEqual(
+                project.bank(2).pattern(3).audio_track(1).active_steps,
+                [],
+            )
+
+
 if __name__ == '__main__':
     unittest.main()

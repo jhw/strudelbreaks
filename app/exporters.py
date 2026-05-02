@@ -61,7 +61,9 @@ def export_strudel(payload: dict, name: str) -> str:
 
 def export_ot_basic(payload: dict, name: str, *,
                     probability: float = 1.0,
-                    split_stems: bool = True) -> bytes:
+                    split_stems: bool = True,
+                    flatten: bool = False,
+                    neighbour: bool = False) -> bytes:
     """Return the OT-basic project .zip as bytes."""
     tmp_dir, export_path = _temp_export(payload, name)
     try:
@@ -69,6 +71,8 @@ def export_ot_basic(payload: dict, name: str, *,
             export_path, name,
             probability=probability,
             split_stems=split_stems,
+            flatten=flatten,
+            neighbour=neighbour,
             output_dir=tmp_dir / 'out',
         )
         return out_path.read_bytes()
@@ -77,13 +81,17 @@ def export_ot_basic(payload: dict, name: str, *,
 
 
 def export_ot_doom(payload: dict, name: str, *,
-                   split_stems: bool = True) -> bytes:
+                   split_stems: bool = True,
+                   flatten: bool = False,
+                   neighbour: bool = False) -> bytes:
     """Return the OT-doom project .zip as bytes."""
     tmp_dir, export_path = _temp_export(payload, name)
     try:
         out_path = ot_doom_render.render(
             export_path, name,
             split_stems=split_stems,
+            flatten=flatten,
+            neighbour=neighbour,
             output_dir=tmp_dir / 'out',
             render_dir=tmp_dir / 'render',
         )

@@ -74,6 +74,20 @@ def _validate_split_stems(body: dict) -> bool:
     return v
 
 
+def _validate_flatten(body: dict) -> bool:
+    v = body.get('flatten', False)
+    if not isinstance(v, bool):
+        raise ValueError('flatten must be a boolean')
+    return v
+
+
+def _validate_neighbour(body: dict) -> bool:
+    v = body.get('neighbour', False)
+    if not isinstance(v, bool):
+        raise ValueError('neighbour must be a boolean')
+    return v
+
+
 def _validate_probability(body: dict) -> float:
     v = body.get('probability', 1.0)
     if not isinstance(v, (int, float)) or isinstance(v, bool):

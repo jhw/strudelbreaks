@@ -74,6 +74,7 @@ from app.export.common.audio_fades import (
     DEFAULT_FADE_OUT_MS,
 )
 from app.export.common.schema import load_export
+from app.export.octatrack._flatten import flatten_cells, regroup_doom
 
 from .audio import (
     OT_SAMPLE_RATE,
@@ -241,57 +242,83 @@ def _render_row_chains(
     return flex_slots
 
 
-def _configure_pattern(bank, pattern_num, flex_slots, n, n_ot_tracks):
-    """Write a single pattern: N trigs at 16/N spacing on every enabled
-    OT track, all sample-locked to the same packed slot for that chain
+def _configure_pattern(bank, pattern_num, flex_slots, n, flex_tracks):
+    """Write a single pattern: N trigs at 16/N spacing on every flex
+    track, all sample-locked to the same packed slot for that chain
     position. No per-trig slice_index lock — trigs inherit the
     per-track slice_index from the active scene on part 1."""
     interval = N_PATTERN_STEPS // n
     pattern = bank.pattern(pattern_num)
     pattern.scale_length = N_PATTERN_STEPS
     active_steps = [k * interval + 1 for k in range(n)]
-    for track_idx in range(n_ot_tracks):
-        track = pattern.audio_track(track_idx + 1)
+    for track_num in flex_tracks:
+        track = pattern.audio_track(track_num)
         track.active_steps = active_steps
         for k, step_num in enumerate(active_steps):
             step = track.step(step_num)
             step.sample_lock = flex_slots[k]
 
 
-def _configure_part(part, default_packed_slot, n, n_ot_tracks):
+def flex_track_nums(n_stems, neighbour):
+    """OT track numbers each stem plays from. Same scheme as ot-basic:
+    neighbour mode interleaves a partner track between every flex
+    track, so stems land on T1, T3, T5 instead of T1, T2, T3."""
+    step = 2 if neighbour else 1
+    return tuple(1 + i * step for i in range(n_stems))
+
+
+def _configure_part(part, default_packed_slot, n, flex_tracks, *, neighbour=False):
     """Configure part 1 once per bank.
 
-    Each enabled OT track sample-plays from the same packed slots, with
-    per-track scene values addressing that stem's slice range. T1..Tk
-    take DJ_EQ + COMPRESSOR; T8 hosts CHORUS + DELAY at mix=64 as the
+    Each flex track sample-plays from the same packed slots, with
+    per-track scene values addressing that stem's slice range. Flex
+    tracks take DJ_EQ + COMPRESSOR.
+
+    Without neighbour: T8 hosts CHORUS + DELAY at mix=64 as the
     project-level send chain.
+
+    With neighbour: every flex track is paired with a neighbour
+    machine on the next track (FILTER + DELAY). T8 keeps just the
+    spatializer — delay moved to the per-track neighbours.
     """
-    for track_idx in range(n_ot_tracks):
-        t = part.audio_track(track_idx + 1)
+    for stem_idx, track_num in enumerate(flex_tracks):
+        t = part.audio_track(track_num)
         t.configure_flex(default_packed_slot)
         t.setup.slice = SliceMode.ON
         t.fx1_type = FX1Type.DJ_EQ
         t.fx2_type = FX2Type.COMPRESSOR
 
     # Per-track scenes — each stem occupies n contiguous slices in the
-    # packed slot. Track i sweeps slice_index `i*n → i*n + (n - 1)`.
-    # The OT crossfader interpolates raw STRT (= slice_index * 2)
-    # between scene A and scene B; with this range each input segment
-    # is reachable on its own band of the fader.
-    for track_idx in range(n_ot_tracks):
-        scene_a = part.scene(1).track(track_idx + 1)
-        scene_b = part.scene(2).track(track_idx + 1)
-        scene_a.slice_index = track_idx * n
-        scene_b.slice_index = track_idx * n + (n - 1)
+    # packed slot. Stem i sweeps slice_index `i*n → i*n + (n - 1)` on
+    # its own flex track. The OT crossfader interpolates raw STRT
+    # (= slice_index * 2) between scene A and scene B; with this range
+    # each input segment is reachable on its own band of the fader.
+    for stem_idx, track_num in enumerate(flex_tracks):
+        scene_a = part.scene(1).track(track_num)
+        scene_b = part.scene(2).track(track_num)
+        scene_a.slice_index = stem_idx * n
+        scene_b.slice_index = stem_idx * n + (n - 1)
     part.active_scene_a = 0
     part.active_scene_b = 1
 
-    t8 = part.audio_track(8)
-    t8.fx1_type = FX1Type.CHORUS
-    t8.fx1.mix = T8_FX_LEVEL    # CHORUS: wet/dry on .mix
-    t8.fx2_type = FX2Type.DELAY
-    t8.fx2.send = T8_FX_LEVEL          # DELAY: wet level on .send (no .mix here)
-    t8.fx2.feedback = T8_DELAY_FEEDBACK  # encoder B — see T8_DELAY_FEEDBACK
+    if neighbour:
+        for nb_num in (t + 1 for t in flex_tracks):
+            nb = part.audio_track(nb_num)
+            nb.configure_neighbor()
+            nb.fx1_type = FX1Type.FILTER
+            nb.fx2_type = FX2Type.DELAY
+            nb.fx2.send = T8_FX_LEVEL
+            nb.fx2.feedback = T8_DELAY_FEEDBACK
+        t8 = part.audio_track(8)
+        t8.fx1_type = FX1Type.SPATIALIZER
+        t8.fx2_type = FX2Type.OFF
+    else:
+        t8 = part.audio_track(8)
+        t8.fx1_type = FX1Type.CHORUS
+        t8.fx1.mix = T8_FX_LEVEL    # CHORUS: wet/dry on .mix
+        t8.fx2_type = FX2Type.DELAY
+        t8.fx2.send = T8_FX_LEVEL          # DELAY: wet level on .send (no .mix here)
+        t8.fx2.feedback = T8_DELAY_FEEDBACK  # encoder B — see T8_DELAY_FEEDBACK
 
 
 def render_bank(
@@ -305,6 +332,7 @@ def render_bank(
     *,
     fade_in_ms,
     fade_out_ms,
+    neighbour=False,
 ):
     """Render up to PATTERNS_PER_BANK rows into one OT bank.
 
@@ -349,15 +377,16 @@ def render_bank(
 
     bank = project.bank(bank_num)
     part = bank.part(1)
-    n_ot_tracks = len(stem_tracks)
+    flex_tracks = flex_track_nums(len(stem_tracks), neighbour)
     # Default flex slot is the first chain of the first pattern — only
     # used when a step has no sample_lock, which never happens in our
     # patterns.
-    _configure_part(part, pattern_slots[0][0], n, n_ot_tracks)
+    _configure_part(part, pattern_slots[0][0], n, flex_tracks,
+                    neighbour=neighbour)
 
     # Write each pattern with its own chain trigs.
     for pattern_idx, slots in enumerate(pattern_slots):
-        _configure_pattern(bank, pattern_idx + 1, slots, n, n_ot_tracks)
+        _configure_pattern(bank, pattern_idx + 1, slots, n, flex_tracks)
 
 
 def _resolve_stem_paths(*, gist_user, gist_id, names, target_bpm, stem_tracks):
@@ -386,7 +415,8 @@ def _resolve_stem_paths(*, gist_user, gist_id, names, target_bpm, stem_tracks):
     )
 
 
-def build_project(export_path, name, *, split_stems=True, render_dir=None,
+def build_project(export_path, name, *, split_stems=True, flatten=False,
+                  neighbour=False, render_dir=None,
                   fade_in_ms=DEFAULT_FADE_IN_MS,
                   fade_out_ms=DEFAULT_FADE_OUT_MS):
     payload, ctx = load_export(export_path, REQUIRED_CTX)
@@ -396,6 +426,14 @@ def build_project(export_path, name, *, split_stems=True, render_dir=None,
     rows_in = [b for b in (payload.get('banks') or []) if b]
     if not rows_in:
         sys.exit('no non-empty rows in export')
+    if flatten:
+        # Collapse list-of-lists into a flat cell list, then re-row by
+        # greedy 16/8/4 decomposition. Stray patterns (remainder < 4)
+        # raise ValueError → caller surfaces in the UI status panel.
+        try:
+            rows_in = regroup_doom(flatten_cells(rows_in))
+        except ValueError as e:
+            sys.exit(str(e))
 
     max_rows = MAX_BANKS * PATTERNS_PER_BANK
     if len(rows_in) > max_rows:
@@ -448,11 +486,21 @@ def build_project(export_path, name, *, split_stems=True, render_dir=None,
             if p.is_file():
                 p.unlink()
 
-    # Pack rows sequentially: rows 1..16 → bank 1, rows 17..32 → bank
-    # 2, etc. Same-|C|-per-bank validation happens inside render_bank.
-    for bank_idx in range(0, len(rows_in), PATTERNS_PER_BANK):
-        bank_num = (bank_idx // PATTERNS_PER_BANK) + 1
-        bank_rows = rows_in[bank_idx:bank_idx + PATTERNS_PER_BANK]
+    # Pack rows into banks. Same-|C| within a bank is required (every
+    # pattern shares part 1's per-track scenes). Default mode (no
+    # flatten): pack 16 patterns per bank sequentially — render_bank
+    # rejects mixed-|C|-within-a-bank loudly. Flatten mode produces
+    # rows with descending sizes (16-cell rows first, then 8, then 4);
+    # we start a new bank whenever |C| changes so each bank stays
+    # uniform without the user having to re-arrange anything.
+    if flatten:
+        bank_groups = _split_into_banks(rows_in, PATTERNS_PER_BANK)
+    else:
+        bank_groups = [
+            rows_in[i:i + PATTERNS_PER_BANK]
+            for i in range(0, len(rows_in), PATTERNS_PER_BANK)
+        ]
+    for bank_num, bank_rows in enumerate(bank_groups, start=1):
         render_bank(
             project,
             bank_num,
@@ -463,17 +511,43 @@ def build_project(export_path, name, *, split_stems=True, render_dir=None,
             row_render_root / f'bank{bank_num:02d}',
             fade_in_ms=fade_in_ms,
             fade_out_ms=fade_out_ms,
+            neighbour=neighbour,
         )
 
     return project
 
 
-def render(export_path, name, *, split_stems=True,
-           output_dir=None, render_dir=None,
+def _split_into_banks(rows, patterns_per_bank):
+    """Group rows into banks. A new bank starts when (a) the current
+    bank is full, or (b) the next row's |C| differs from the bank's
+    leading |C|. Mixed-|C|-within-a-bank is rejected downstream by
+    render_bank, so this packer keeps banks uniform up-front.
+    """
+    banks = []
+    current = []
+    current_n = None
+    for row in rows:
+        n = len(row)
+        if current and (n != current_n or len(current) >= patterns_per_bank):
+            banks.append(current)
+            current = []
+            current_n = None
+        if not current:
+            current_n = n
+        current.append(row)
+    if current:
+        banks.append(current)
+    return banks
+
+
+def render(export_path, name, *, split_stems=True, flatten=False,
+           neighbour=False, output_dir=None, render_dir=None,
            fade_in_ms=DEFAULT_FADE_IN_MS,
            fade_out_ms=DEFAULT_FADE_OUT_MS):
     project = build_project(export_path, name,
                             split_stems=split_stems,
+                            flatten=flatten,
+                            neighbour=neighbour,
                             render_dir=render_dir,
                             fade_in_ms=fade_in_ms,
                             fade_out_ms=fade_out_ms)

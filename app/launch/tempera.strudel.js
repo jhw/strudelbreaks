@@ -370,19 +370,37 @@ function downloadAs(blob, filename) {
 // these knobs at send time.
 const exportConfig = {
   splitStems: true,  // OT split-stems mode (T1=kick / T2=snare / T3=hat)
+  flatten: false,    // OT flatten patches: collapse banks → single list
+  neighbour: false,  // OT neighbour machines: 4 FX per drum track
 };
 
+// Long-running status line for export round-trips. Lambda export
+// turn-arounds run 3-5s; without a visible status the click feels
+// dead. Set on send, cleared on response (success or failure).
+const statusPanel = SB.ui.createStatusPanel({
+  corner: 'bottom-left', id: 'status',
+});
+
+function otFlags(target) {
+  if (target !== 'ot-basic' && target !== 'ot-doom') return {};
+  return {
+    split_stems: exportConfig.splitStems,
+    flatten:     exportConfig.flatten,
+    neighbour:   exportConfig.neighbour,
+  };
+}
+
 async function exportViaServer(spec) {
-  const body = { payload: capturesPayload };
-  if (spec.target === 'ot-basic' || spec.target === 'ot-doom') {
-    body.split_stems = exportConfig.splitStems;
-  }
+  const body = { payload: capturesPayload, ...otFlags(spec.target) };
+  statusPanel.setText('Exporting to ' + spec.target + '…');
   try {
     const { filename, blob } = await postExport(spec.target, body);
     downloadAs(blob, filename);
   } catch (e) {
     console.error('[tempera] export failed:', e);
     notify('Export failed: ' + e.message);
+  } finally {
+    statusPanel.clear();
   }
 }
 
@@ -396,6 +414,7 @@ async function exportViaServer(spec) {
 // reader changes.
 async function openInStrudel(spec) {
   let filename, blob, text;
+  statusPanel.setText('Exporting to ' + spec.target + '…');
   try {
     ({ filename, blob } = await postExport(spec.target, {
       payload: capturesPayload,
@@ -405,6 +424,8 @@ async function openInStrudel(spec) {
     console.error('[tempera] strudel export failed:', e);
     notify('Strudel export failed: ' + e.message);
     return;
+  } finally {
+    statusPanel.clear();
   }
 
   // Best-effort clipboard fallback. Browsers reject writeText if the
@@ -467,10 +488,20 @@ const splitStemsToggle = SB.ui.createToggleSwitch({
   initial: exportConfig.splitStems,
   onChange: (v) => { exportConfig.splitStems = v; },
 });
+const flattenToggle = SB.ui.createToggleSwitch({
+  label: 'flatten',
+  initial: exportConfig.flatten,
+  onChange: (v) => { exportConfig.flatten = v; },
+});
+const neighbourToggle = SB.ui.createToggleSwitch({
+  label: 'neighbour',
+  initial: exportConfig.neighbour,
+  onChange: (v) => { exportConfig.neighbour = v; },
+});
 const exportConfigBar = SB.ui.createFormBar({
   corner: 'top-right', id: 'export-config-bar',
   stack: 'captures-toolbar',
-  items: [splitStemsToggle.element],
+  items: [splitStemsToggle.element, flattenToggle.element, neighbourToggle.element],
 });
 
 const capturesList = SB.ui.createCornerPanel({

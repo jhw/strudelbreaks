@@ -49,6 +49,7 @@ from octapy import (
 from app.export.common import sample_source
 from app.export.common.devices import OT_SAMPLE_RATE
 from app.export.common.schema import load_export
+from app.export.octatrack._flatten import flatten_cells, regroup_basic
 
 # Per-drum stems we ask beatwav to produce in split mode. Maps to OT
 # audio tracks 1/2/3 in trig order. Mixed mode renders one combined
@@ -166,26 +167,65 @@ def collect_break_names(banks):
     return names
 
 
-def configure_track_fx(part, n_ot_tracks):
+def flex_track_nums(n_stems, neighbour):
+    """OT track numbers each stem plays from.
+
+    Without neighbour: stems on T1, T2, T3 (or T1 alone in mixed mode).
+    With neighbour: every flex track gets a paired neighbour machine
+    on the next track (T2/T4/T6) for an extra two FX, so stems move to
+    T1, T3, T5 instead.
+    """
+    step = 2 if neighbour else 1
+    return tuple(1 + i * step for i in range(n_stems))
+
+
+def neighbour_track_nums(flex_tracks):
+    """Each flex track's neighbour partner — flex track + 1."""
+    return tuple(t + 1 for t in flex_tracks)
+
+
+def configure_track_fx(part, flex_tracks, *, neighbour=False):
     """Set FX layout on part 1 once per bank.
 
-    Each enabled audio track (1..n_ot_tracks) gets DJ_EQ on FX1 and
-    COMPRESSOR on FX2 — independent EQ + dynamics per kit piece in
-    split mode, or just one shaping chain in mixed mode. T8 hosts
-    CHORUS (FX1) and DELAY (FX2) at mix=64 as the project-level send
-    chain.
+    Each enabled flex track gets DJ_EQ on FX1 and COMPRESSOR on FX2 —
+    independent EQ + dynamics per kit piece in split mode, or one
+    shaping chain in mixed mode.
+
+    Without neighbour: T8 hosts CHORUS + DELAY at mix=64 as the
+    project-level send chain (the legacy layout).
+
+    With neighbour: every flex track is paired with a neighbour
+    machine on the next track (DELAY on FX1, FILTER on FX2 — two more
+    FX in series). T8's send chain drops the delay (now per-track) and
+    keeps just the spatializer.
     """
-    for track_num in range(1, n_ot_tracks + 1):
+    for track_num in flex_tracks:
         t = part.audio_track(track_num)
         t.fx1_type = FX1Type.DJ_EQ
         t.fx2_type = FX2Type.COMPRESSOR
 
-    t8 = part.audio_track(8)
-    t8.fx1_type = FX1Type.CHORUS
-    t8.fx1.mix = T8_FX_LEVEL    # CHORUS: wet/dry on .mix
-    t8.fx2_type = FX2Type.DELAY
-    t8.fx2.send = T8_FX_LEVEL          # DELAY: wet level on .send (no .mix here)
-    t8.fx2.feedback = T8_DELAY_FEEDBACK  # encoder B — see T8_DELAY_FEEDBACK
+    if neighbour:
+        # Neighbour machine sits next to its flex track and chains 2
+        # more FX onto that track's audio (FILTER + DELAY here). T8's
+        # send chain drops to spatializer-only — delay moved to the
+        # neighbour tracks.
+        for nb_num in neighbour_track_nums(flex_tracks):
+            nb = part.audio_track(nb_num)
+            nb.configure_neighbor()
+            nb.fx1_type = FX1Type.FILTER
+            nb.fx2_type = FX2Type.DELAY
+            nb.fx2.send = T8_FX_LEVEL
+            nb.fx2.feedback = T8_DELAY_FEEDBACK
+        t8 = part.audio_track(8)
+        t8.fx1_type = FX1Type.SPATIALIZER
+        t8.fx2_type = FX2Type.OFF
+    else:
+        t8 = part.audio_track(8)
+        t8.fx1_type = FX1Type.CHORUS
+        t8.fx1.mix = T8_FX_LEVEL    # CHORUS: wet/dry on .mix
+        t8.fx2_type = FX2Type.DELAY
+        t8.fx2.send = T8_FX_LEVEL          # DELAY: wet level on .send (no .mix here)
+        t8.fx2.feedback = T8_DELAY_FEEDBACK  # encoder B — see T8_DELAY_FEEDBACK
 
 
 def _resolve_stem_paths(*, gist_user, gist_id, names, target_bpm, stem_tracks):
@@ -213,7 +253,8 @@ def _resolve_stem_paths(*, gist_user, gist_id, names, target_bpm, stem_tracks):
     )
 
 
-def build_project(export_path, name, probability=1.0, split_stems=True):
+def build_project(export_path, name, probability=1.0,
+                  split_stems=True, flatten=False, neighbour=False):
     trig_condition = probability_to_condition(probability)
     payload, ctx = load_export(export_path, REQUIRED_CTX)
     if ctx['nSlices'] != N_SLICES:
@@ -222,6 +263,12 @@ def build_project(export_path, name, probability=1.0, split_stems=True):
     banks_in = [b for b in (payload.get('banks') or []) if b]
     if not banks_in:
         sys.exit('no non-empty banks in export')
+    if flatten:
+        # Collapse list-of-lists into a flat cell list, then re-pack
+        # into 16-cell banks. The total cell count caps at 16×16 = 256.
+        banks_in = regroup_basic(flatten_cells(banks_in))
+        if not banks_in:
+            sys.exit('flatten produced no cells')
     if len(banks_in) > 16:
         sys.exit(f'too many banks: {len(banks_in)} > 16')
     for i, bank in enumerate(banks_in):
@@ -229,7 +276,7 @@ def build_project(export_path, name, probability=1.0, split_stems=True):
             sys.exit(f'bank {i} has {len(bank)} cells > 16')
 
     stem_tracks = _stem_tracks(split_stems)
-    n_ot_tracks = len(stem_tracks)
+    flex_tracks = flex_track_nums(len(stem_tracks), neighbour)
 
     break_names = collect_break_names(banks_in)
     stem_paths = _resolve_stem_paths(
@@ -266,11 +313,11 @@ def build_project(export_path, name, probability=1.0, split_stems=True):
         bank = project.bank(bank_idx + 1)
         part = bank.part(1)
 
-        for track_idx, stem in enumerate(stem_tracks):
-            t = part.audio_track(track_idx + 1)
+        for track_num, stem in zip(flex_tracks, stem_tracks):
+            t = part.audio_track(track_num)
             t.configure_flex(default_slot_per_track[stem])
             t.setup.slice = SliceMode.ON
-        configure_track_fx(part, n_ot_tracks)
+        configure_track_fx(part, flex_tracks, neighbour=neighbour)
 
         for cell_idx, cell in enumerate(bank_cells):
             pattern = bank.pattern(cell_idx + 1)
@@ -283,8 +330,8 @@ def build_project(export_path, name, probability=1.0, split_stems=True):
             )
             active = [2 * i + 1 for i, (_, s) in enumerate(events) if s is not None]
 
-            for track_idx, stem in enumerate(stem_tracks):
-                pattern_track = pattern.audio_track(track_idx + 1)
+            for track_num, stem in zip(flex_tracks, stem_tracks):
+                pattern_track = pattern.audio_track(track_num)
                 pattern_track.active_steps = active
                 for i, (n, slice_idx) in enumerate(events):
                     if slice_idx is None:
@@ -299,10 +346,13 @@ def build_project(export_path, name, probability=1.0, split_stems=True):
 
 
 def render(export_path, name, *, probability=1.0,
-           split_stems=True, output_dir=None):
+           split_stems=True, flatten=False, neighbour=False,
+           output_dir=None):
     project = build_project(export_path, name,
                             probability=probability,
-                            split_stems=split_stems)
+                            split_stems=split_stems,
+                            flatten=flatten,
+                            neighbour=neighbour)
     out_dir = pathlib.Path(output_dir) if output_dir is not None else OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     zip_path = out_dir / f'{name}.zip'

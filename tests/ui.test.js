@@ -71,6 +71,20 @@ function installDOMStub() {
       const i = arr.indexOf(fn);
       if (i >= 0) arr.splice(i, 1);
     },
+    getElementById(id) {
+      // Minimal walk: descend from body looking for an element whose
+      // .id matches. createCornerPanel sets el.id directly, then the
+      // stack-ref / re-mount paths look the panel back up by id.
+      function find(el) {
+        if (el.id === id) return el;
+        for (const c of el.children) {
+          const hit = find(c);
+          if (hit) return hit;
+        }
+        return null;
+      }
+      return find(this.body);
+    },
     querySelectorAll() { return []; },
     // Test helper: simulate a click somewhere in the document with a
     // particular target. Runs every registered document-level click
@@ -81,11 +95,11 @@ function installDOMStub() {
       for (const fn of (docListeners.click || []).slice()) fn(ev);
     },
   };
-  global.window = { innerWidth: 1024 };
+  global.window = { innerWidth: 1024, innerHeight: 768 };
 }
 
 installDOMStub();
-const { ui: { createActionMenu } } = require('../breaks.js');
+const { ui: { createActionMenu, createStatusPanel } } = require('../breaks.js');
 
 function makeAnchor() {
   const a = document.createElement('button');
@@ -199,4 +213,26 @@ test('throws when items is empty or missing', () => {
 test('throws when anchor is missing', () => {
   assert.throws(() => createActionMenu({ items: [{ label: 'x', onSelect: () => {} }] }),
     /needs anchor/);
+});
+
+test('createStatusPanel: starts hidden, setText shows + writes, clear hides', () => {
+  const p = createStatusPanel({ id: 'status-test-1' });
+  assert.strictEqual(p.element.style.display, 'none',
+    'panel should start hidden');
+  p.setText('Exporting to ot-basic…');
+  assert.strictEqual(p.element.textContent, 'Exporting to ot-basic…');
+  assert.notStrictEqual(p.element.style.display, 'none',
+    'setText must un-hide the panel');
+  p.clear();
+  assert.strictEqual(p.element.textContent, '');
+  assert.strictEqual(p.element.style.display, 'none',
+    'clear must re-hide the panel');
+});
+
+test('createStatusPanel: same id reuses the existing element', () => {
+  const a = createStatusPanel({ id: 'status-test-2' });
+  a.setText('first');
+  const b = createStatusPanel({ id: 'status-test-2' });
+  assert.strictEqual(a.element, b.element,
+    'second call must reuse the DOM node — same id');
 });
