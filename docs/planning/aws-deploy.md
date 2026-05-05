@@ -90,8 +90,8 @@ Per-handler shape (mirrors outrights-mip's `simulate/handler.py`):
    goes away from the body entirely; the route encodes the target.
    Per-target body shape:
    - **strudel**:   `payload`, optional `name`, `seed`
-   - **ot-basic**:  `payload`, optional `name`, `seed`, `probability`, `split_stems`
-   - **ot-doom**:   `payload`, optional `name`, `seed`, `split_stems`
+   - **ot-basic**:  `payload`, optional `name`, `seed`, `probability`, `flatten`
+   - **ot-doom**:   `payload`, optional `name`, `seed`, `flatten`
    - **torso-s4**:  `payload`, optional `name`, `seed`, `source`
 4. Call into `app.exporters.export_*` (unchanged).
 5. Return `{statusCode, headers, body}`. For the three binary

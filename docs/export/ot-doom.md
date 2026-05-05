@@ -10,16 +10,10 @@ payload to `POST /api/export/ot-doom`; the server
 calls `app.export.octatrack.ot_doom.render.render()` and streams the
 project zip back. Browser saves to `~/Downloads/<name>.ot-doom.zip`.
 
-JSON-source rendering only. Two stem modes (controlled by the
-request's `split_stems` field, default `true`):
-
-* **`split_stems=true`** — each break is rendered as three drum stems
-  (kick / snare / hat) via beatwav at 44.1 kHz, stacked into one
-  packed sample per chain position; T1/T2/T3 each play their own stem
-  under independent scene drives.
-* **`split_stems=false`** — each break is rendered as one mixed
-  sample; T1 alone plays it. Used to A/B audio fidelity against the
-  Strudel source.
+JSON-source rendering only. Each break is rendered as three drum
+stems (kick / snare / hat) via beatwav at 44.1 kHz, stacked into one
+packed sample per chain position; T1/T2/T3 each play their own stem
+under independent scene drives.
 
 ## Two readings of "Megabreak of Doom"
 
@@ -139,8 +133,8 @@ total per cell).
 
 ### Step 3 — Build N packed matrix chains per row
 
-Given N input cell-renders per drum stem (`3 * N` audios total in
-split mode, `1 * N` in mixed mode), each one bar long:
+Given `3 * N` input cell-renders (N inputs per drum stem), each one
+bar long:
 
 1. Slice every per-stem `input[k]` into N equal segments — segment
    duration = `bar_ms / N`. With N=4 and 1 bar = 1875 ms (at 128
@@ -154,34 +148,31 @@ split mode, `1 * N` in mixed mode), each one bar long:
    ```
    Each per-stem block: `N` segments long, `bar_ms` total.
 3. Stack the per-stem blocks into one packed chain in fixed order
-   (kick, snare, hat in split mode; the single mixed block in mixed
-   mode):
+   (kick, snare, hat):
    ```
    chain[k] = stem_chain['kick'][k]
             ++ stem_chain['snare'][k]
             ++ stem_chain['hat'][k]
    ```
-   `chain[k]` length = `len(stems) * bar_ms`. For split-mode N=16 and
-   `bar_ms = 1875`, that's 3 × 1875 = 5625 ms.
-4. Each packed chain gets exactly `len(stems) * N` equal slice markers
-   — in split mode kick block at slices `0..N-1`, snare at
-   `N..2N-1`, hat at `2N..3N-1`. Per-track scenes on part 1 address
-   each block.
+   `chain[k]` length = `3 * bar_ms`. For N=16 and `bar_ms = 1875`,
+   that's 3 × 1875 = 5625 ms.
+4. Each packed chain gets exactly `3 * N` equal slice markers — kick
+   block at slices `0..N-1`, snare at `N..2N-1`, hat at `2N..3N-1`.
+   Per-track scenes on part 1 address each block.
 
 ### Step 4 — Bind packed chains to flex slots
 
 Each packed chain → one flex slot via `project.add_sample(path,
 slot_type='FLEX')`. N slots per row across the whole project; the
 flex pool ceiling is **128 slots** and is validated up-front. Total
-slots = sum of `|C|` across all rows. Slot count is the same in
-mixed and split modes — split mode packs the three stems into one
-slot per chain position. Worst-case dense packs:
+slots = sum of `|C|` across all rows. The chain packs the three
+stems into one slot per chain position. Worst-case dense packs:
 
 - 16 rows × `|C|=8` = 128 slots — at the ceiling, accepted.
 - 17 rows × `|C|=8` = 136 — rejected with an explicit message.
 - 16 rows × `|C|=16` = 256 — rejected.
 
-Slice-marker math sanity (must stay ≤ 64 per sample, split mode):
+Slice-marker math sanity (must stay ≤ 64 per sample):
 
 - `|C|=4`  → 3 × 4  = 12 slices/slot ✓
 - `|C|=8`  → 3 × 8  = 24 slices/slot ✓
@@ -198,11 +189,10 @@ Pattern length 16 steps (1 bar at 1/16). Trigs at every step `1 + k *
 - N=8 → trigs at 1, 3, 5, 7, 9, 11, 13, 15
 - N=16 → trig at every step
 
-In split mode T1, T2, T3 all fire at the same N positions, all
-sample-locked to the same packed slot for that chain. In mixed mode
-only T1 fires. **No** per-trig `slice_index` lock on any track —
-that would override the scene drive and was the bug in the original
-ot-doom redesign.
+T1, T2, T3 all fire at the same N positions, all sample-locked to
+the same packed slot for that chain. **No** per-trig `slice_index`
+lock on any track — that would override the scene drive and was the
+bug in the original ot-doom redesign.
 
 Part 1 setup (configured once per bank, shared by all the bank's
 patterns):
@@ -219,12 +209,9 @@ patterns):
 
 Per-track scenes on part 1 (shared across the bank's patterns):
 
-- Split mode:
-  - T1 (kick):  `scene(1).track(1).slice_index = 0`,         `scene(2).track(1).slice_index = N - 1`
-  - T2 (snare): `scene(1).track(2).slice_index = N`,         `scene(2).track(2).slice_index = 2N - 1`
-  - T3 (hat):   `scene(1).track(3).slice_index = 2N`,        `scene(2).track(3).slice_index = 3N - 1`
-- Mixed mode:
-  - T1:         `scene(1).track(1).slice_index = 0`,         `scene(2).track(1).slice_index = N - 1`
+- T1 (kick):  `scene(1).track(1).slice_index = 0`,         `scene(2).track(1).slice_index = N - 1`
+- T2 (snare): `scene(1).track(2).slice_index = N`,         `scene(2).track(2).slice_index = 2N - 1`
+- T3 (hat):   `scene(1).track(3).slice_index = 2N`,        `scene(2).track(3).slice_index = 3N - 1`
 - `active_scene_a = 0; active_scene_b = 1`
 
 For each enabled track the crossfader interpolates raw STRT from

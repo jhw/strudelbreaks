@@ -51,17 +51,9 @@ from app.export.common.devices import OT_SAMPLE_RATE
 from app.export.common.schema import load_export
 from app.export.octatrack._flatten import flatten_cells, regroup_basic
 
-# Per-drum stems we ask beatwav to produce in split mode. Maps to OT
-# audio tracks 1/2/3 in trig order. Mixed mode renders one combined
-# sample per break and uses T1 only — useful for an A/B fidelity
-# check against the Strudel source.
+# Per-drum stems we ask beatwav to produce. Maps to OT audio tracks
+# 1/2/3 in trig order.
 TRACKS = ('kick', 'snare', 'hat')
-MIXED_STEM = 'mixed'
-
-
-def _stem_tracks(split_stems):
-    """OT audio-track stems used for this render."""
-    return TRACKS if split_stems else (MIXED_STEM,)
 
 # Source break wavs are 32 steps (2 bars at 1/16). N_SLICES=16 cuts them
 # into 16 slices of 2 steps each, so a slice spans an 1/8 note plus the
@@ -167,94 +159,27 @@ def collect_break_names(banks):
     return names
 
 
-def flex_track_nums(n_stems, neighbour):
-    """OT track numbers each stem plays from.
-
-    Without neighbour: stems on T1, T2, T3 (or T1 alone in mixed mode).
-    With neighbour: every flex track gets a paired neighbour machine
-    on the next track (T2/T4/T6) for an extra two FX, so stems move to
-    T1, T3, T5 instead.
-    """
-    step = 2 if neighbour else 1
-    return tuple(1 + i * step for i in range(n_stems))
-
-
-def neighbour_track_nums(flex_tracks):
-    """Each flex track's neighbour partner — flex track + 1."""
-    return tuple(t + 1 for t in flex_tracks)
-
-
-def configure_track_fx(part, flex_tracks, *, neighbour=False):
+def configure_track_fx(part, flex_tracks):
     """Set FX layout on part 1 once per bank.
 
-    Each enabled flex track gets DJ_EQ on FX1 and COMPRESSOR on FX2 —
-    independent EQ + dynamics per kit piece in split mode, or one
-    shaping chain in mixed mode.
-
-    Without neighbour: T8 hosts CHORUS + DELAY at mix=64 as the
-    project-level send chain (the legacy layout).
-
-    With neighbour: every flex track is paired with a neighbour
-    machine on the next track (DELAY on FX1, FILTER on FX2 — two more
-    FX in series). T8's send chain drops the delay (now per-track) and
-    keeps just the spatializer.
+    Each flex track gets DJ_EQ on FX1 and COMPRESSOR on FX2 —
+    independent EQ + dynamics per kit piece. T8 hosts CHORUS + DELAY
+    at mix=64 as the project-level send chain.
     """
     for track_num in flex_tracks:
         t = part.audio_track(track_num)
         t.fx1_type = FX1Type.DJ_EQ
         t.fx2_type = FX2Type.COMPRESSOR
 
-    if neighbour:
-        # Neighbour machine sits next to its flex track and chains 2
-        # more FX onto that track's audio (FILTER + DELAY here). T8's
-        # send chain drops to spatializer-only — delay moved to the
-        # neighbour tracks.
-        for nb_num in neighbour_track_nums(flex_tracks):
-            nb = part.audio_track(nb_num)
-            nb.configure_neighbor()
-            nb.fx1_type = FX1Type.FILTER
-            nb.fx2_type = FX2Type.DELAY
-            nb.fx2.send = T8_FX_LEVEL
-            nb.fx2.feedback = T8_DELAY_FEEDBACK
-        t8 = part.audio_track(8)
-        t8.fx1_type = FX1Type.SPATIALIZER
-        t8.fx2_type = FX2Type.OFF
-    else:
-        t8 = part.audio_track(8)
-        t8.fx1_type = FX1Type.CHORUS
-        t8.fx1.mix = T8_FX_LEVEL    # CHORUS: wet/dry on .mix
-        t8.fx2_type = FX2Type.DELAY
-        t8.fx2.send = T8_FX_LEVEL          # DELAY: wet level on .send (no .mix here)
-        t8.fx2.feedback = T8_DELAY_FEEDBACK  # encoder B — see T8_DELAY_FEEDBACK
+    t8 = part.audio_track(8)
+    t8.fx1_type = FX1Type.CHORUS
+    t8.fx1.mix = T8_FX_LEVEL    # CHORUS: wet/dry on .mix
+    t8.fx2_type = FX2Type.DELAY
+    t8.fx2.send = T8_FX_LEVEL          # DELAY: wet level on .send (no .mix here)
+    t8.fx2.feedback = T8_DELAY_FEEDBACK  # encoder B — see T8_DELAY_FEEDBACK
 
 
-def _resolve_stem_paths(*, gist_user, gist_id, names, target_bpm, stem_tracks):
-    """Fetch break audio in the layout the renderer expects:
-    `{name: {stem: path}}`. Split mode returns the per-track JSON
-    render; mixed mode returns one combined sample per break."""
-    if stem_tracks == (MIXED_STEM,):
-        flat = sample_source.resolve_break_paths(
-            gist_user=gist_user,
-            gist_id=gist_id,
-            names=names,
-            source='json',
-            target_bpm=target_bpm,
-            target_sample_rate=OT_SAMPLE_RATE,
-        )
-        return {n: {MIXED_STEM: p} for n, p in flat.items()}
-    return sample_source.resolve_break_paths(
-        gist_user=gist_user,
-        gist_id=gist_id,
-        names=names,
-        source='json',
-        target_bpm=target_bpm,
-        target_sample_rate=OT_SAMPLE_RATE,
-        tracks=stem_tracks,
-    )
-
-
-def build_project(export_path, name, probability=1.0,
-                  split_stems=True, flatten=False, neighbour=False):
+def build_project(export_path, name, probability=1.0, flatten=False):
     trig_condition = probability_to_condition(probability)
     payload, ctx = load_export(export_path, REQUIRED_CTX)
     if ctx['nSlices'] != N_SLICES:
@@ -275,27 +200,27 @@ def build_project(export_path, name, probability=1.0,
         if len(bank) > 16:
             sys.exit(f'bank {i} has {len(bank)} cells > 16')
 
-    stem_tracks = _stem_tracks(split_stems)
-    flex_tracks = flex_track_nums(len(stem_tracks), neighbour)
+    flex_tracks = tuple(range(1, len(TRACKS) + 1))
 
     break_names = collect_break_names(banks_in)
-    stem_paths = _resolve_stem_paths(
+    stem_paths = sample_source.resolve_break_paths(
         gist_user=ctx['gistUser'],
         gist_id=ctx['gistId'],
         names=break_names,
+        source='json',
         target_bpm=ctx['bpm'],
-        stem_tracks=stem_tracks,
+        target_sample_rate=OT_SAMPLE_RATE,
+        tracks=TRACKS,
     )
 
     project = Project.from_template(name.upper()[:16])
     project.settings.tempo = float(ctx['bpm'])
     project.master_track = True
 
-    # Split mode: 3 flex slots per break (kick/snare/hat), one per OT
-    # track. Mixed mode: 1 slot per break used by T1 only.
+    # 3 flex slots per break (kick/snare/hat), one per OT track.
     flex_slots = {}  # {(name, stem): slot}
     for n in break_names:
-        for stem in stem_tracks:
+        for stem in TRACKS:
             path = stem_paths[n][stem]
             slot = project.add_sample(str(path.resolve()), slot_type='FLEX')
             flex_slots[(n, stem)] = slot
@@ -306,18 +231,18 @@ def build_project(export_path, name, probability=1.0,
     # sample_lock, which our patterns never produce; we pick the first
     # break's stem so the default sound matches the rest of the kit.
     default_slot_per_track = {
-        stem: flex_slots[(break_names[0], stem)] for stem in stem_tracks
+        stem: flex_slots[(break_names[0], stem)] for stem in TRACKS
     }
 
     for bank_idx, bank_cells in enumerate(banks_in):
         bank = project.bank(bank_idx + 1)
         part = bank.part(1)
 
-        for track_num, stem in zip(flex_tracks, stem_tracks):
+        for track_num, stem in zip(flex_tracks, TRACKS):
             t = part.audio_track(track_num)
             t.configure_flex(default_slot_per_track[stem])
             t.setup.slice = SliceMode.ON
-        configure_track_fx(part, flex_tracks, neighbour=neighbour)
+        configure_track_fx(part, flex_tracks)
 
         for cell_idx, cell in enumerate(bank_cells):
             pattern = bank.pattern(cell_idx + 1)
@@ -330,7 +255,7 @@ def build_project(export_path, name, probability=1.0,
             )
             active = [2 * i + 1 for i, (_, s) in enumerate(events) if s is not None]
 
-            for track_num, stem in zip(flex_tracks, stem_tracks):
+            for track_num, stem in zip(flex_tracks, TRACKS):
                 pattern_track = pattern.audio_track(track_num)
                 pattern_track.active_steps = active
                 for i, (n, slice_idx) in enumerate(events):
@@ -345,14 +270,11 @@ def build_project(export_path, name, probability=1.0,
     return project
 
 
-def render(export_path, name, *, probability=1.0,
-           split_stems=True, flatten=False, neighbour=False,
+def render(export_path, name, *, probability=1.0, flatten=False,
            output_dir=None):
     project = build_project(export_path, name,
                             probability=probability,
-                            split_stems=split_stems,
-                            flatten=flatten,
-                            neighbour=neighbour)
+                            flatten=flatten)
     out_dir = pathlib.Path(output_dir) if output_dir is not None else OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     zip_path = out_dir / f'{name}.zip'

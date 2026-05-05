@@ -9,15 +9,11 @@ def _body(body: dict) -> dict:
     payload = _common._validate_payload(body)
     name = _common._validate_name(body)
     seed = _common._validate_seed(body)
-    split_stems = _common._validate_split_stems(body)
     flatten = _common._validate_flatten(body)
-    neighbour = _common._validate_neighbour(body)
     resolved = exporters.resolve_name(name, seed)
     data = exporters.export_ot_doom(
         payload, resolved,
-        split_stems=split_stems,
         flatten=flatten,
-        neighbour=neighbour,
     )
     return _common.binary_response(data, filename=f'{resolved}.ot.zip')
 

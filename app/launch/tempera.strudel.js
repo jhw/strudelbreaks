@@ -369,9 +369,7 @@ function downloadAs(blob, filename) {
 // the user picks 'ot-basic' / 'ot-doom' we read the current state of
 // these knobs at send time.
 const exportConfig = {
-  splitStems: true,  // OT split-stems mode (T1=kick / T2=snare / T3=hat)
   flatten: false,    // OT flatten patches: collapse banks → single list
-  neighbour: false,  // OT neighbour machines: 4 FX per drum track
 };
 
 // Long-running status line for export round-trips. Lambda export
@@ -384,9 +382,7 @@ const statusPanel = SB.ui.createStatusPanel({
 function otFlags(target) {
   if (target !== 'ot-basic' && target !== 'ot-doom') return {};
   return {
-    split_stems: exportConfig.splitStems,
-    flatten:     exportConfig.flatten,
-    neighbour:   exportConfig.neighbour,
+    flatten: exportConfig.flatten,
   };
 }
 
@@ -483,25 +479,15 @@ const capturesToolbar = SB.ui.createFormBar({
   ],
 });
 
-const splitStemsToggle = SB.ui.createToggleSwitch({
-  label: 'split stems',
-  initial: exportConfig.splitStems,
-  onChange: (v) => { exportConfig.splitStems = v; },
-});
 const flattenToggle = SB.ui.createToggleSwitch({
-  label: 'flatten',
+  label: 'OT flatten',
   initial: exportConfig.flatten,
   onChange: (v) => { exportConfig.flatten = v; },
-});
-const neighbourToggle = SB.ui.createToggleSwitch({
-  label: 'neighbour',
-  initial: exportConfig.neighbour,
-  onChange: (v) => { exportConfig.neighbour = v; },
 });
 const exportConfigBar = SB.ui.createFormBar({
   corner: 'top-right', id: 'export-config-bar',
   stack: 'captures-toolbar',
-  items: [splitStemsToggle.element, flattenToggle.element, neighbourToggle.element],
+  items: [flattenToggle.element],
 });
 
 const capturesList = SB.ui.createCornerPanel({

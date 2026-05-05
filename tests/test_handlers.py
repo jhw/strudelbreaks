@@ -78,7 +78,7 @@ class OtBasicHandlerTest(unittest.TestCase):
             with zipfile.ZipFile(io.BytesIO(data)) as zf:
                 self.assertTrue(any(n.endswith('.work') for n in zf.namelist()))
 
-    def test_accepts_flatten_and_neighbour_flags(self):
+    def test_accepts_flatten_flag(self):
         with WorkDir() as wd:
             paths = make_per_track_break_wavs(
                 wd.samples, ['kk'], tracks=('kick', 'snare', 'hat'),
@@ -90,7 +90,7 @@ class OtBasicHandlerTest(unittest.TestCase):
             ]])
             r = ot_basic_handler(_event({
                 'payload': payload, 'name': 'OTB2',
-                'flatten': True, 'neighbour': True,
+                'flatten': True,
             }))
             self.assertEqual(r['statusCode'], 200, r.get('body'))
 

@@ -5,17 +5,11 @@ Each tempera row → one OT pattern. Patterns pack 16 per bank: rows
 etc. All patterns in a bank share part 1's per-track scene config,
 so all rows in a bank must share the same `|C|`.
 
-Two stem modes:
-
-* split_stems=True (default): per pattern each cell renders to a bar
-  of audio per drum stem (kick, snare, hat); chain[k] = stack across
-  stems of (segment_k(input_0) ++ … ++ segment_k(input_{N-1})). N
-  flex slots per pattern, each holding 3 * N slices. N trigs on each
-  of T1/T2/T3 at intervals of 16/N. Per-track scenes on part 1
-  address each stem's N-slice range.
-
-* split_stems=False: one mixed render per cell; chain[k] holds N
-  segments only. T1 alone trigs and the part has scenes on T1 only.
+Per pattern each cell renders to a bar of audio per drum stem (kick,
+snare, hat); chain[k] = stack across stems of (segment_k(input_0) ++
+… ++ segment_k(input_{N-1})). N flex slots per pattern, each holding
+3 * N slices. N trigs on each of T1/T2/T3 at intervals of 16/N.
+Per-track scenes on part 1 address each stem's N-slice range.
 
 See docs/export/ot-doom.md for the full design.
 """
@@ -29,7 +23,6 @@ from octapy import FX1Type, FX2Type, Project
 from ._fixtures import (
     WorkDir,
     load_render_module,
-    make_break_wavs,
     make_capture_cell,
     make_export,
     make_per_track_break_wavs,
@@ -153,25 +146,6 @@ class OtDoomAudioHelpersTest(unittest.TestCase):
                 packed_first.raw_data, track_first.raw_data,
                 f'block {j} ({track}) does not start with that stem',
             )
-
-    def test_build_matrix_chain_mixed_mode_single_stem(self):
-        # Mixed mode (split_stems=False) renders one combined sample
-        # per cell; the chain is just N segments (no per-stem stacking).
-        from pydub import AudioSegment
-
-        rate = 44100
-        bar_ms = 1600
-        n = 4
-        per_stem_inputs = {
-            'mixed': [AudioSegment.silent(duration=bar_ms, frame_rate=rate)
-                      for _ in range(n)],
-        }
-        chain0 = self.audio.build_matrix_chain(
-            per_stem_inputs, ['mixed'], k=0, n=n,
-        )
-        self.assertEqual(len(chain0), n * (bar_ms // n))
-        self.assertEqual(chain0.frame_rate, rate)
-
 
 class OtDoomCellCountValidationTest(unittest.TestCase):
     """|C| (cells per row) must be in {4, 8, 16}."""
@@ -409,138 +383,6 @@ class OtDoomRoundtripTest(unittest.TestCase):
                     step = track.step(step_num)
                     self.assertEqual(step.sample_lock, chain_slots[k])
                     self.assertIsNone(step.slice_index)
-
-
-class OtDoomMixedModeTest(unittest.TestCase):
-    """split_stems=False renders one combined sample per cell and
-    routes everything to T1; scenes A/B sweep slice_index 0 ↔ N-1.
-    Used for an A/B fidelity check against the Strudel source."""
-
-    def test_mixed_mode_single_track_layout(self):
-        render = load_render_module('octatrack/ot-doom')
-        with WorkDir() as wd:
-            # Mixed mode pulls flat (name → path) source paths.
-            paths = make_break_wavs(wd.samples, ['kk', 'sn'],
-                                    bpm=120, steps=32)
-            wd.stub_sources(paths)
-
-            cells = [
-                make_capture_cell(['kk', 'sn', 'kk', 'sn'], [0, 1, 2, 3, 4, 5, 6, 7]),
-                make_capture_cell(['kk', 'sn', 'kk', 'sn'], [1, 2, 3, 4, 5, 6, 7, 8]),
-                make_capture_cell(['kk', 'sn', 'kk', 'sn'], [2, 3, 4, 5, 6, 7, 8, 9]),
-                make_capture_cell(['kk', 'sn', 'kk', 'sn'], [3, 4, 5, 6, 7, 8, 9, 10]),
-            ]
-            payload = make_export([cells])
-            wd.write_export(payload)
-
-            render.OUTPUT_DIR = wd.root / 'out'
-            render.RENDER_DIR = wd.root / 'render'
-            zip_path = render.render(wd.export_path, 'OTDOOMMIX',
-                                     split_stems=False)
-            self.assertTrue(zip_path.exists())
-
-            project = Project.from_zip(zip_path)
-            n = 4
-
-            # Each chain is just N slices — no per-stem stacking.
-            for k in range(n):
-                slot = project.get_slot(f'b01_p01_chain{k:02d}.wav')
-                self.assertIsNotNone(slot)
-                sm = project.markers.get_slot(slot, is_static=False)
-                self.assertEqual(sm.slice_count, n)
-
-            part = project.bank(1).part(1)
-            # T1 only is configured (slice mode + FX). T2/T3 untouched.
-            self.assertEqual(int(part.audio_track(1).setup.slice), 1)
-            self.assertEqual(part.audio_track(1).fx1_type, FX1Type.DJ_EQ)
-            self.assertEqual(part.audio_track(1).fx2_type, FX2Type.COMPRESSOR)
-
-            # T1 scenes sweep slice 0 ↔ N-1 in the single-stem chain.
-            self.assertEqual(part.scene(1).track(1).slice_index, 0)
-            self.assertEqual(part.scene(2).track(1).slice_index, n - 1)
-
-            # T8 send chain still configured.
-            t8 = part.audio_track(8)
-            self.assertEqual(t8.fx1_type, FX1Type.CHORUS)
-            self.assertEqual(t8.fx2_type, FX2Type.DELAY)
-
-            # Pattern: trigs on T1 only.
-            pattern = project.bank(1).pattern(1)
-            self.assertEqual(pattern.audio_track(1).active_steps, [1, 5, 9, 13])
-            self.assertEqual(pattern.audio_track(2).active_steps, [])
-            self.assertEqual(pattern.audio_track(3).active_steps, [])
-
-
-class OtDoomNeighbourTest(unittest.TestCase):
-    """neighbour=True: flex tracks shift to T1/T3/T5; T2/T4/T6 are
-    neighbour machines with FILTER + DELAY; T8 drops the delay and
-    keeps just the spatializer."""
-
-    def test_split_neighbour_layout(self):
-        from octapy.api.enums import MachineType
-        render = load_render_module('octatrack/ot-doom')
-        with WorkDir() as wd:
-            paths = make_per_track_break_wavs(
-                wd.samples, ['kk', 'sn'], tracks=TRACKS,
-                bpm=120, steps=32,
-            )
-            wd.stub_sources(paths)
-
-            cells = [
-                make_capture_cell(['kk', 'sn', 'kk', 'sn'], [0, 1, 2, 3, 4, 5, 6, 7]),
-                make_capture_cell(['kk', 'sn', 'kk', 'sn'], [1, 2, 3, 4, 5, 6, 7, 8]),
-                make_capture_cell(['kk', 'sn', 'kk', 'sn'], [2, 3, 4, 5, 6, 7, 8, 9]),
-                make_capture_cell(['kk', 'sn', 'kk', 'sn'], [3, 4, 5, 6, 7, 8, 9, 10]),
-            ]
-            payload = make_export([cells])
-            wd.write_export(payload)
-
-            render.OUTPUT_DIR = wd.root / 'out'
-            render.RENDER_DIR = wd.root / 'render'
-            zip_path = render.render(wd.export_path, 'DMNB',
-                                     neighbour=True)
-
-            project = Project.from_zip(zip_path)
-            part = project.bank(1).part(1)
-            n = 4
-
-            # Flex tracks T1/T3/T5 — DJ_EQ + COMPRESSOR; per-track
-            # scenes still address each stem's slice range, but on
-            # the new track numbers.
-            for stem_idx, track_num in enumerate((1, 3, 5)):
-                t = part.audio_track(track_num)
-                self.assertEqual(int(t.machine_type), int(MachineType.FLEX))
-                self.assertEqual(int(t.setup.slice), 1)
-                self.assertEqual(t.fx1_type, FX1Type.DJ_EQ)
-                self.assertEqual(t.fx2_type, FX2Type.COMPRESSOR)
-                self.assertEqual(part.scene(1).track(track_num).slice_index,
-                                 stem_idx * n)
-                self.assertEqual(part.scene(2).track(track_num).slice_index,
-                                 stem_idx * n + (n - 1))
-
-            # Neighbours T2/T4/T6 — FILTER + DELAY each.
-            for nb_num in (2, 4, 6):
-                nb = part.audio_track(nb_num)
-                self.assertEqual(int(nb.machine_type), int(MachineType.NEIGHBOR))
-                self.assertEqual(nb.fx1_type, FX1Type.FILTER)
-                self.assertEqual(nb.fx2_type, FX2Type.DELAY)
-
-            # T8 keeps just the spatializer.
-            t8 = part.audio_track(8)
-            self.assertEqual(t8.fx1_type, FX1Type.SPATIALIZER)
-            self.assertEqual(t8.fx2_type, FX2Type.OFF)
-
-            # Pattern trigs on T1/T3/T5, not the legacy T1/T2/T3.
-            pattern = project.bank(1).pattern(1)
-            for track_num in (1, 3, 5):
-                self.assertEqual(
-                    pattern.audio_track(track_num).active_steps,
-                    [1, 5, 9, 13],
-                )
-            for nb_num in (2, 4, 6):
-                self.assertEqual(
-                    pattern.audio_track(nb_num).active_steps, [],
-                )
 
 
 class OtDoomFlattenTest(unittest.TestCase):

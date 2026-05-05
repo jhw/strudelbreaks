@@ -67,24 +67,10 @@ def _validate_seed(body: dict) -> int | None:
     return seed
 
 
-def _validate_split_stems(body: dict) -> bool:
-    v = body.get('split_stems', True)
-    if not isinstance(v, bool):
-        raise ValueError('split_stems must be a boolean')
-    return v
-
-
 def _validate_flatten(body: dict) -> bool:
     v = body.get('flatten', False)
     if not isinstance(v, bool):
         raise ValueError('flatten must be a boolean')
-    return v
-
-
-def _validate_neighbour(body: dict) -> bool:
-    v = body.get('neighbour', False)
-    if not isinstance(v, bool):
-        raise ValueError('neighbour must be a boolean')
     return v
 
 

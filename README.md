@@ -268,8 +268,8 @@ Endpoints (one Lambda per route, all on the same image — different
 ```
 POST /api/export/strudel   { payload, name?, seed? }
 POST /api/export/ot-basic  { payload, name?, seed?,
-                             probability?, split_stems? }
-POST /api/export/ot-doom   { payload, name?, seed?, split_stems? }
+                             probability?, flatten? }
+POST /api/export/ot-doom   { payload, name?, seed?, flatten? }
 POST /api/export/torso-s4  { payload, name?, seed?, source? }
 ```
 
@@ -335,10 +335,7 @@ OT targets need per-stem decomposition and are JSON-only).
 The OT targets render each break **per drum stem** (kick / snare /
 hat) by filtering the JSON's matched_hits per drum type. Stems map
 to OT tracks T1, T2, T3 — each gets its own DJ_EQ + COMPRESSOR for
-independent shaping, sharing CHORUS + DELAY on T8. Set the
-`split_stems` request field to `false` (the tempera UI exposes a
-toggle) to render one mixed sample per break onto T1 only — useful
-for A/B-ing the OT export against the Strudel source.
+independent shaping, sharing CHORUS + DELAY on T8.
 
 JSON-mode rendering pulls one-shots from the configured S3 bucket
 (`ONESHOT_S3_URI` env var, defaults to `s3://wol-samplebank/samples/`)
